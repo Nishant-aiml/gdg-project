@@ -1,16 +1,48 @@
-"""Quick check of batch statuses."""
-import requests
+"""Check database, storage, and auth status"""
+import os
+import sys
 
-r = requests.get('http://localhost:8000/api/batches/list')
-batches = r.json()[:5]
+# Check database
+try:
+    from config.database import get_db, Batch, Block, Document
+    db = next(get_db())
+    batches = db.query(Batch).count()
+    blocks = db.query(Block).count()
+    docs = db.query(Document).count()
+    print("DATABASE: OK")
+    print(f"  - Batches: {batches}")
+    print(f"  - Blocks: {blocks}")
+    print(f"  - Documents: {docs}")
+    db.close()
+except Exception as e:
+    print(f"DATABASE: FAILED - {e}")
 
-print("Recent batches:")
-for b in batches:
-    print(f"  {b.get('batch_id')}: status={b.get('status')}, docs={b.get('total_documents')}")
-    
-    # Get processing status
-    bid = b.get('batch_id')
-    r2 = requests.get(f'http://localhost:8000/api/processing/status/{bid}')
-    if r2.status_code == 200:
-        s = r2.json()
-        print(f"    -> processing_status={s.get('status')}, errors={s.get('errors', [])}")
+# Check storage
+upload_dir = "data/uploads"
+if os.path.exists(upload_dir):
+    files = len(os.listdir(upload_dir))
+    print(f"STORAGE: OK (data/uploads exists, {files} files)")
+else:
+    print("STORAGE: data/uploads not found")
+
+# Check auth config
+try:
+    from config.settings import settings
+    has_firebase = bool(settings.FIREBASE_API_KEY and settings.FIREBASE_PROJECT_ID)
+    if has_firebase:
+        print("AUTH (Firebase): Configured")
+        print(f"  - Project: {settings.FIREBASE_PROJECT_ID}")
+    else:
+        print("AUTH (Firebase): NOT configured (missing API key or project ID)")
+except Exception as e:
+    print(f"AUTH: Error checking - {e}")
+
+# Check OpenAI
+try:
+    from config.settings import settings
+    if settings.OPENAI_API_KEY:
+        print(f"OPENAI: Configured (key length: {len(settings.OPENAI_API_KEY)})")
+    else:
+        print("OPENAI: NOT configured")
+except Exception as e:
+    print(f"OPENAI: Error - {e}")

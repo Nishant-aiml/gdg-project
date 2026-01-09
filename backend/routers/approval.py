@@ -3,9 +3,10 @@ Approval API Router.
 Provides classification and readiness scoring for approval requests.
 """
 
-from fastapi import APIRouter, HTTPException
-from typing import Dict, Any
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Dict, Any, Optional
 from config.database import get_db, close_db, Batch, Block
+from middleware.auth_middleware import get_current_user
 from services.approval_classifier import (
     classify_approval,
     get_required_documents,
@@ -17,7 +18,10 @@ router = APIRouter()
 
 
 @router.get("/approval/{batch_id}")
-def get_approval_classification(batch_id: str) -> Dict[str, Any]:
+def get_approval_classification(
+    batch_id: str,
+    user: Optional[dict] = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
     Get approval classification and readiness for a batch.
     
@@ -73,11 +77,80 @@ def get_approval_classification(batch_id: str) -> Dict[str, Any]:
             extracted_data
         )
         
+        # Transform required_docs list of dicts to list of strings
+        required_docs_names = []
+        required_docs_readable = []
+        for doc in required_docs:
+            if isinstance(doc, dict):
+                doc_name = doc.get("name", "")
+                doc_desc = doc.get("description", doc_name)
+                if doc_name:
+                    required_docs_names.append(doc_name)
+                    required_docs_readable.append(doc_desc)
+            elif isinstance(doc, str):
+                required_docs_names.append(doc)
+                required_docs_readable.append(doc)
+        
+        # Get present documents (found documents)
+        documents_found = []
+        for doc_name in required_docs_names:
+            # Check if this document is present
+            doc_name_lower = doc_name.lower()
+            found = any(
+                doc_name_lower in str(pd).lower() or str(pd).lower() in doc_name_lower
+                for pd in present_docs
+            )
+            if found:
+                documents_found.append(doc_name)
+        
+        # Get document details with confidence
+        document_details = []
+        for doc_name in required_docs_names:
+            doc_name_lower = doc_name.lower()
+            found = any(
+                doc_name_lower in str(pd).lower() or str(pd).lower() in doc_name_lower
+                for pd in present_docs
+            )
+            # Try to find matching block for confidence
+            confidence = 0.0
+            for block in blocks:
+                if block.block_type and doc_name_lower in block.block_type.lower():
+                    confidence = block.confidence or block.extraction_confidence or 0.0
+                    break
+            
+            document_details.append({
+                "document_key": doc_name,
+                "document_name": doc_name,
+                "present": found,
+                "confidence": confidence
+            })
+        
+        # Generate recommendation
+        readiness_score = readiness.get("readiness_score", 0.0)
+        if readiness_score >= 80:
+            recommendation = "Your institution is well-prepared for approval. All required documents are present."
+        elif readiness_score >= 50:
+            recommendation = "Your institution is partially prepared. Upload the missing documents to improve readiness."
+        else:
+            recommendation = "Your institution needs significant improvement. Please upload the missing required documents to proceed with approval."
+        
         return {
             "batch_id": batch_id,
             "mode": batch.mode,
-            **readiness,
-            "required_documents_list": required_docs
+            "classification": readiness.get("classification", classification),
+            "required_documents": required_docs_names,
+            "required_documents_readable": required_docs_readable,
+            "documents_found": documents_found,
+            "missing_documents": readiness.get("missing_documents", []),
+            "missing_documents_readable": [
+                required_docs_readable[required_docs_names.index(m)] if m in required_docs_names
+                else m for m in readiness.get("missing_documents", [])
+            ],
+            "document_details": document_details,
+            "readiness_score": readiness_score,
+            "recommendation": recommendation,
+            "present": readiness.get("present_documents", 0),
+            "required": readiness.get("required_documents", len(required_docs_names))
         }
     
     finally:

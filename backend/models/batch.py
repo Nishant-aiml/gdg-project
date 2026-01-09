@@ -8,9 +8,10 @@ from datetime import datetime
 from enum import Enum
 
 class ReviewerMode(str, Enum):
-    UGC = "ugc"
     AICTE = "aicte"
-    MIXED = "mixed"  # Combined AICTE + UGC evaluation
+    NBA = "nba"
+    NAAC = "naac"
+    NIRF = "nirf"
 
 class BatchStatus(str, Enum):
     CREATED = "created"
@@ -28,7 +29,7 @@ class BatchStatus(str, Enum):
 # This is just for API schemas - actual storage is in SQLite
 class Batch(BaseModel):
     batch_id: str = Field(..., description="Unique batch identifier")
-    mode: ReviewerMode = Field(..., description="UGC or AICTE mode")
+    mode: ReviewerMode = Field(..., description="Accreditation mode: AICTE, NBA, NAAC, or NIRF")
     status: BatchStatus = Field(default=BatchStatus.CREATED)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -43,7 +44,7 @@ class Batch(BaseModel):
         json_schema_extra = {
             "example": {
                 "batch_id": "batch_2024_001",
-                "mode": "ugc",
+                "mode": "aicte",
                 "status": "completed"
             }
         }

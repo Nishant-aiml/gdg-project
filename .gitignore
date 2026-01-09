@@ -42,6 +42,12 @@ backend/storage/
 backend/figures/
 backend/data/
 
+# Firebase service account (DO NOT COMMIT)
+firebase-service-account.json
+backend/firebase-service-account.json
+*service*account*.json
+accreditation-platform-*.json
+
 # Test outputs
 *.log
 test_output*.txt

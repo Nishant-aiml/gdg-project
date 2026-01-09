@@ -22,7 +22,25 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Network-first strategy - always try network first
+  const url = event.request.url;
+
+  // Skip service worker for external APIs to prevent auth errors
+  const skipUrls = [
+    'googleapis.com',
+    'firebase',
+    'identitytoolkit',
+    'securetoken',
+    'accounts.google.com',
+    'localhost:8000',
+    '127.0.0.1:8000'
+  ];
+
+  if (skipUrls.some(skip => url.includes(skip))) {
+    // Let these requests pass through without service worker interference
+    return;
+  }
+
+  // Network-first strategy for everything else
   event.respondWith(
     fetch(event.request)
       .catch(() => {

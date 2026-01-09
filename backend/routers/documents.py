@@ -3,13 +3,14 @@ File upload router - SQLite version
 Temporary storage only
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File as FastAPIFile, Form
-from typing import List
+from fastapi import APIRouter, HTTPException, UploadFile, File as FastAPIFile, Form, Depends
+from typing import List, Optional
 from schemas.document import DocumentUploadResponse, DocumentResponse, DocumentListResponse
 from config.database import get_db, File, Batch, close_db
 from config.settings import settings
 from utils.id_generator import generate_document_id
 from utils.file_utils import save_uploaded_file, get_mime_type
+from middleware.auth_middleware import get_current_user
 from datetime import datetime, timezone
 import shutil
 from pathlib import Path
@@ -19,7 +20,8 @@ router = APIRouter()
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     batch_id: str = Form(...),
-    file: UploadFile = FastAPIFile(...)
+    file: UploadFile = FastAPIFile(...),
+    user: Optional[dict] = Depends(get_current_user)
 ):
     """Upload a file to a batch - PDF only (or JPG/PNG which will be wrapped in PDF)"""
     import logging
@@ -47,44 +49,97 @@ async def upload_document(
                 detail=f"Allowed file types: PDF, JPG, PNG, Excel (.xlsx, .xls), CSV, Word (.docx). Received: {file_ext}."
             )
         
-        # Save file and calculate size simultaneously (chunked reading)
+        # PERFORMANCE: Read file content in chunks and calculate size
         file_size = 0
-        upload_dir = Path(settings.UPLOAD_DIR) / batch_id
-        upload_dir.mkdir(parents=True, exist_ok=True)
+        file_chunks = []
         
-        file_path = upload_dir / file.filename
-        
-        # Save file in chunks to avoid memory issues
-        with open(file_path, "wb") as f:
-            while True:
-                chunk = await file.read(8192)  # Read in 8KB chunks
-                if not chunk:
-                    break
-                file_size += len(chunk)
-                if file_size > settings.MAX_FILE_SIZE:
-                    # Clean up partial file
-                    if file_path.exists():
-                        file_path.unlink()
-                    raise HTTPException(
-                        status_code=400, 
-                        detail=f"File too large. Maximum size: {settings.MAX_FILE_SIZE / (1024*1024):.0f}MB"
-                    )
-                f.write(chunk)
+        while True:
+            chunk = await file.read(8192)  # Read in 8KB chunks
+            if not chunk:
+                break
+            file_size += len(chunk)
+            if file_size > settings.MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"File too large. Maximum size: {settings.MAX_FILE_SIZE / (1024*1024):.0f}MB"
+                )
+            file_chunks.append(chunk)
         
         if file_size == 0:
-            if file_path.exists():
-                file_path.unlink()
             raise HTTPException(status_code=400, detail="File is empty")
+        
+        # Combine chunks into single bytes
+        file_content = b"".join(file_chunks)
+        
+        # GOOGLE INTEGRATION: Upload to Firebase Storage (primary) or local storage (fallback)
+        from services.firebase_storage import upload_file_to_firebase, get_firebase_storage_path
+        from utils.file_utils import get_mime_type
+        
+        storage_path = get_firebase_storage_path(batch_id, file.filename)
+        content_type = get_mime_type(file.filename)
+        
+        # Try Firebase Storage first
+        firebase_url = upload_file_to_firebase(
+            file_content=file_content,
+            destination_path=storage_path,
+            content_type=content_type,
+            metadata={"batch_id": batch_id, "filename": file.filename}
+        )
+        
+        # Fallback to local storage if Firebase Storage is not available
+        if firebase_url:
+            file_path = storage_path  # Store Firebase path, not local path
+            logger.info(f"File uploaded to Firebase Storage: {firebase_url}")
+        else:
+            # Fallback to local storage
+            upload_dir = Path(settings.UPLOAD_DIR) / batch_id
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            file_path = upload_dir / file.filename
+            
+            # Save to local storage
+            with open(file_path, "wb") as f:
+                f.write(file_content)
+            
+            file_path = str(file_path)  # Convert to string for DB storage
+            logger.info(f"File saved to local storage (Firebase Storage not available): {file_path}")
+        
+        # Calculate document hash for duplicate detection (use file content, not path)
+        import hashlib
+        
+        try:
+            # Calculate hash from file content (works for both Firebase and local)
+            file_hash = hashlib.sha256(file_content).hexdigest()
+            
+            # Check for duplicate
+            from utils.document_hash import check_duplicate_hash
+            is_duplicate, existing_batch_id = check_duplicate_hash(db, file_hash, batch_id)
+            if is_duplicate:
+                # Clean up uploaded file if local
+                if not firebase_url and Path(file_path).exists():
+                    Path(file_path).unlink()
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Duplicate document detected. This file already exists in batch {existing_batch_id}"
+                )
+        except HTTPException:
+            raise
+        except Exception as hash_error:
+            logger.warning(f"Error calculating hash: {hash_error}, continuing without duplicate check")
+            file_hash = None
         
         # Create file record
         file_id = generate_document_id()
+        
+        # Store Firebase URL if available, otherwise local path
+        stored_path = firebase_url if firebase_url else str(file_path)
         
         file_record = File(
             id=file_id,
             batch_id=batch_id,
             filename=file.filename,
-            filepath=str(file_path),
+            filepath=stored_path,  # Firebase URL or local path
             file_size=file_size,
+            document_hash=file_hash,  # Store hash for duplicate detection
             uploaded_at=datetime.now(timezone.utc)
         )
         
@@ -150,44 +205,96 @@ async def upload_document_with_path(
                 detail=f"Allowed file types: PDF, JPG, PNG, Excel (.xlsx, .xls), CSV, Word (.docx). Received: {file_ext}."
             )
         
-        # Read file content in chunks to check size and save efficiently
+        # PERFORMANCE: Read file content in chunks and calculate size
         file_size = 0
-        upload_dir = Path(settings.UPLOAD_DIR) / batch_id
-        upload_dir.mkdir(parents=True, exist_ok=True)
+        file_chunks = []
         
-        file_path = upload_dir / file.filename
-        
-        # Save file and calculate size simultaneously
-        with open(file_path, "wb") as f:
-            while True:
-                chunk = await file.read(8192)  # Read in 8KB chunks
-                if not chunk:
-                    break
-                file_size += len(chunk)
-                if file_size > settings.MAX_FILE_SIZE:
-                    # Clean up partial file
-                    if file_path.exists():
-                        file_path.unlink()
-                    raise HTTPException(
-                        status_code=400, 
-                        detail=f"File too large. Maximum size: {settings.MAX_FILE_SIZE / (1024*1024):.0f}MB"
-                    )
-                f.write(chunk)
+        while True:
+            chunk = await file.read(8192)  # Read in 8KB chunks
+            if not chunk:
+                break
+            file_size += len(chunk)
+            if file_size > settings.MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"File too large. Maximum size: {settings.MAX_FILE_SIZE / (1024*1024):.0f}MB"
+                )
+            file_chunks.append(chunk)
         
         if file_size == 0:
-            if file_path.exists():
-                file_path.unlink()
             raise HTTPException(status_code=400, detail="File is empty")
+        
+        # Combine chunks into single bytes
+        file_content = b"".join(file_chunks)
+        
+        # GOOGLE INTEGRATION: Upload to Firebase Storage (primary) or local storage (fallback)
+        from services.firebase_storage import upload_file_to_firebase, get_firebase_storage_path
+        from utils.file_utils import get_mime_type
+        
+        storage_path = get_firebase_storage_path(batch_id, file.filename)
+        content_type = get_mime_type(file.filename)
+        
+        # Try Firebase Storage first
+        firebase_url = upload_file_to_firebase(
+            file_content=file_content,
+            destination_path=storage_path,
+            content_type=content_type,
+            metadata={"batch_id": batch_id, "filename": file.filename}
+        )
+        
+        # Fallback to local storage if Firebase Storage is not available
+        if firebase_url:
+            file_path = storage_path  # Store Firebase path, not local path
+            logger.info(f"File uploaded to Firebase Storage: {firebase_url}")
+        else:
+            # Fallback to local storage
+            upload_dir = Path(settings.UPLOAD_DIR) / batch_id
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            file_path = upload_dir / file.filename
+            
+            # Save to local storage
+            with open(file_path, "wb") as f:
+                f.write(file_content)
+            
+            file_path = str(file_path)  # Convert to string for DB storage
+            logger.info(f"File saved to local storage (Firebase Storage not available): {file_path}")
+        
+        # Calculate document hash for duplicate detection (use file content, not path)
+        import hashlib
+        
+        try:
+            # Calculate hash from file content (works for both Firebase and local)
+            file_hash = hashlib.sha256(file_content).hexdigest()
+            
+            # Check for duplicate
+            is_duplicate, existing_batch_id = check_duplicate_hash(db, file_hash, batch_id)
+            if is_duplicate:
+                # Clean up uploaded file if local
+                if not firebase_url and Path(file_path).exists():
+                    Path(file_path).unlink()
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Duplicate document detected. This file already exists in batch {existing_batch_id}"
+                )
+        except HTTPException:
+            raise
+        except Exception as hash_error:
+            logger.warning(f"Error calculating hash: {hash_error}, continuing without duplicate check")
+            file_hash = None
         
         # Create file record
         file_id = generate_document_id()
+        
+        # Store Firebase URL if available, otherwise local path
+        stored_path = firebase_url if firebase_url else str(file_path)
         
         file_record = File(
             id=file_id,
             batch_id=batch_id,
             filename=file.filename,
-            filepath=str(file_path),
+            filepath=stored_path,  # Firebase URL or local path
             file_size=file_size,
+            document_hash=file_hash,  # Store hash for duplicate detection
             uploaded_at=datetime.now(timezone.utc)
         )
         
@@ -245,7 +352,10 @@ def list_documents(batch_id: str):
         close_db(db)
 
 @router.delete("/{document_id}")
-def delete_document(document_id: str):
+def delete_document(
+    document_id: str,
+    user: Optional[dict] = Depends(get_current_user)
+):
     """Delete a file"""
     db = get_db()
     

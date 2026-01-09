@@ -12,10 +12,22 @@ class Settings(BaseSettings):
     MONGODB_URI: Optional[str] = None  # Alternative name for compatibility
     MONGODB_DB_NAME: str = "smart_approval_ai"
     
-    # OpenAI
+    # Google Gemini (PRIMARY - Free Tier)
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_MODEL: str = "gemini-2.5-flash"  # Primary AI model - Gemini 2.5 Flash (free tier, fast)
+    
+    # OpenAI (Fallback when Gemini unavailable)
     OPENAI_API_KEY: Optional[str] = None
-    OPENAI_MODEL_PRIMARY: str = "gpt-5-nano"  # Primary model for classification, extraction, and chatbot
-    OPENAI_MODEL_FALLBACK: str = "gpt-5-mini"  # Fallback model for JSON validation errors
+    OPENAI_MODEL_PRIMARY: str = "gpt-5-nano"  # Fallback model - GPT-5 Nano (fast, lightweight)
+    OPENAI_MODEL_FALLBACK: str = "gpt-5-mini"  # Last resort fallback - GPT-5 Mini
+    
+    # Firebase
+    FIREBASE_PROJECT_ID: Optional[str] = None  # Firebase Project ID for token verification
+    FIREBASE_STORAGE_BUCKET: Optional[str] = None  # Firebase Storage bucket name
+    GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None  # Path to service account JSON
+    
+    # Database
+    DATABASE_URL: Optional[str] = None  # PostgreSQL connection string (Supabase) or SQLite fallback
     
     # Unstructured-IO
     UNSTRUCTURED_API_KEY: Optional[str] = None
@@ -42,6 +54,7 @@ class Settings(BaseSettings):
         env_file = str(Path(__file__).parent.parent.parent / ".env")
         env_file_encoding = "utf-8"
         case_sensitive = True
+        extra = "ignore"  # Ignore extra fields from .env that aren't in the model
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

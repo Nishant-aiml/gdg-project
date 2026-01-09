@@ -1,12 +1,14 @@
 """
 Multi-Format Document Parser.
 Supports: PDF, Excel (.xlsx, .xls), CSV, Word (.docx)
+PERFORMANCE: 30s timeout per document, 1 retry for parsing failures
 """
 
 import os
 import re
 import json
 from pathlib import Path
+from utils.parsing_retry import retry_parsing_with_timeout
 from typing import Dict, List, Any, Optional, Tuple
 
 # File magic headers for detection
@@ -323,9 +325,35 @@ def parse_word_document(file_path: str) -> Dict[str, Any]:
         }
 
 
+@retry_parsing_with_timeout(timeout_seconds=30.0, max_retries=1)
+def _parse_document_with_retry(file_path: str, file_type: str) -> Dict[str, Any]:
+    """
+    Internal parsing function with retry logic.
+    """
+    parsers = {
+        'pdf': parse_pdf_document,
+        'xlsx': parse_excel_document,
+        'xls': parse_excel_document,
+        'csv': parse_csv_document,
+        'docx': parse_word_document,
+    }
+    
+    parser = parsers.get(file_type)
+    if parser:
+        return parser(file_path)
+    else:
+        return {
+            "text": "",
+            "tables": [],
+            "meta": {"error": f"Unsupported file type: {file_type}"},
+            "document_type": "UNKNOWN",
+        }
+
+
 def parse_document(file_path: str) -> Dict[str, Any]:
     """
     Master document parser. Detects file type and routes to appropriate parser.
+    PERFORMANCE: 30s timeout per document, 1 retry for parsing failures.
     
     Returns:
         {
@@ -345,24 +373,18 @@ def parse_document(file_path: str) -> Dict[str, Any]:
     
     file_type = detect_file_type(file_path)
     
-    parsers = {
-        'pdf': parse_pdf_document,
-        'xlsx': parse_excel_document,
-        'xls': parse_excel_document,
-        'csv': parse_csv_document,
-        'docx': parse_word_document,
-    }
-    
-    parser = parsers.get(file_type)
-    if parser:
-        result = parser(file_path)
-        return result
-    else:
+    try:
+        # Use retry wrapper for parsing
+        return _parse_document_with_retry(file_path, file_type)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Document parsing failed after retries: {e}")
         return {
             "text": "",
             "tables": [],
-            "meta": {"error": f"Unsupported file type: {file_type}"},
-            "document_type": "UNKNOWN",
+            "meta": {"error": f"Parsing failed: {str(e)[:200]}"},
+            "document_type": file_type.upper() if file_type != "unknown" else "UNKNOWN",
         }
 
 

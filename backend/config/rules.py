@@ -1,5 +1,5 @@
 """
-Mode-specific rules and configurations for UGC and AICTE
+Mode-specific rules and configurations for AICTE, NBA, NAAC, and NIRF
 """
 
 from typing import Dict, List
@@ -8,68 +8,131 @@ from typing import Dict, List
 # System now uses 10 Information Blocks only
 # See config/information_blocks.py for block definitions
 
-# KPI definitions and formulas
+# KPI definitions and formulas - OFFICIAL ACCREDITATION RULES
+# Each mode has isolated formulas - NO cross-mode reuse
 KPI_FORMULAS = {
-    "ugc": {
-        "research_index": {
-            "name": "Research Index",
-            "formula": "calculate_research_index",
-            "weight": 0.3
-        },
-        "governance_score": {
-            "name": "Governance Score",
-            "formula": "calculate_governance_score",
-            "weight": 0.3
-        },
-        "student_outcome_index": {
-            "name": "Student Outcome Index",
-            "formula": "calculate_student_outcome_index",
-            "weight": 0.4
-        }
-    },
     "aicte": {
         "fsr_score": {
             "name": "FSR Score",
             "formula": "calculate_fsr_score",
-            "weight": 0.25
+            "weight": 0.25,
+            "official_formula": "FSR = Total Students / Total Faculty",
+            "scoring_rule": "FSR ≤ 15 → 100, 15 < FSR ≤ 20 → linear (100→60), FSR > 20 → penalty"
         },
         "infrastructure_score": {
             "name": "Infrastructure Score",
             "formula": "calculate_infrastructure_score",
-            "weight": 0.25
+            "weight": 0.25,
+            "official_formula": "0.40×Area + 0.25×Classrooms + 0.15×Library + 0.10×Digital + 0.10×Hostel"
         },
         "placement_index": {
             "name": "Placement Index",
             "formula": "calculate_placement_index",
-            "weight": 0.25
+            "weight": 0.25,
+            "official_formula": "Placement % = (Placed / Eligible) × 100"
         },
         "lab_compliance_index": {
             "name": "Lab Compliance Index",
             "formula": "calculate_lab_compliance_index",
-            "weight": 0.25
+            "weight": 0.25,
+            "official_formula": "Lab Compliance = (Available Labs / Required Labs) × 100"
+        }
+    },
+    "nba": {
+        "peos_psos": {
+            "name": "PEOs & PSOs Criterion",
+            "formula": "calculate_nba_peos_psos",
+            "weight": 0.20
+        },
+        "faculty_quality": {
+            "name": "Faculty Quality Criterion",
+            "formula": "calculate_nba_faculty_quality",
+            "weight": 0.20
+        },
+        "student_performance": {
+            "name": "Student Performance Criterion",
+            "formula": "calculate_nba_student_performance",
+            "weight": 0.20
+        },
+        "continuous_improvement": {
+            "name": "Continuous Improvement Criterion",
+            "formula": "calculate_nba_continuous_improvement",
+            "weight": 0.20
+        },
+        "co_po_mapping": {
+            "name": "CO-PO Mapping Criterion",
+            "formula": "calculate_nba_co_po_mapping",
+            "weight": 0.20
+        }
+    },
+    "naac": {
+        "criterion_1": {
+            "name": "NAAC Criterion 1 (Curricular Aspects)",
+            "formula": "calculate_naac_criterion_1",
+            "weight": 0.15
+        },
+        "criterion_2": {
+            "name": "NAAC Criterion 2 (Teaching-Learning & Evaluation)",
+            "formula": "calculate_naac_criterion_2",
+            "weight": 0.15
+        },
+        "criterion_3": {
+            "name": "NAAC Criterion 3 (Research, Innovations & Extension)",
+            "formula": "calculate_naac_criterion_3",
+            "weight": 0.15
+        },
+        "criterion_4": {
+            "name": "NAAC Criterion 4 (Infrastructure & Learning Resources)",
+            "formula": "calculate_naac_criterion_4",
+            "weight": 0.15
+        },
+        "criterion_5": {
+            "name": "NAAC Criterion 5 (Student Support & Progression)",
+            "formula": "calculate_naac_criterion_5",
+            "weight": 0.15
+        },
+        "criterion_6": {
+            "name": "NAAC Criterion 6 (Governance, Leadership & Management)",
+            "formula": "calculate_naac_criterion_6",
+            "weight": 0.15
+        },
+        "criterion_7": {
+            "name": "NAAC Criterion 7 (Institutional Values & Best Practices)",
+            "formula": "calculate_naac_criterion_7",
+            "weight": 0.10
+        }
+    },
+    "nirf": {
+        "tlr": {
+            "name": "Teaching, Learning & Resources (TLR)",
+            "formula": "calculate_nirf_tlr",
+            "weight": 0.30
+        },
+        "rp": {
+            "name": "Research & Professional Practice (RP)",
+            "formula": "calculate_nirf_rp",
+            "weight": 0.30
+        },
+        "go": {
+            "name": "Graduation Outcomes (GO)",
+            "formula": "calculate_nirf_go",
+            "weight": 0.20
+        },
+        "oi": {
+            "name": "Outreach & Inclusivity (OI)",
+            "formula": "calculate_nirf_oi",
+            "weight": 0.10
+        },
+        "pr": {
+            "name": "Perception (PR)",
+            "formula": "calculate_nirf_pr",
+            "weight": 0.10
         }
     }
 }
 
 # Compliance rules
 COMPLIANCE_RULES = {
-    "ugc": [
-        {
-            "rule_id": "missing_committees",
-            "severity": "high",
-            "check": "check_missing_committees"
-        },
-        {
-            "rule_id": "expired_accreditation",
-            "severity": "high",
-            "check": "check_expired_accreditation"
-        },
-        {
-            "rule_id": "insufficient_research",
-            "severity": "medium",
-            "check": "check_research_output"
-        }
-    ],
     "aicte": [
         {
             "rule_id": "expired_fire_noc",

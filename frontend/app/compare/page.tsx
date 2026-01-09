@@ -1,18 +1,32 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
+import ProtectedRoute from '@/components/ProtectedRoute';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { compareApi, batchApi, type ComparisonResponse, type BatchResponse, type SkippedBatch, type RankingResponse } from '@/lib/api';
 import toast from 'react-hot-toast';
+import dynamic from 'next/dynamic';
 import {
     BarChart3, Trophy, AlertTriangle,
     CheckCircle, ArrowLeft, RefreshCw, Check, Award, XCircle
 } from 'lucide-react';
-import Chatbot from '@/components/Chatbot';
-import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-    ResponsiveContainer, PieChart, Pie, Cell
-} from 'recharts';
+
+// Lazy load heavy components for faster initial page load
+const Chatbot = dynamic(() => import('@/components/Chatbot'), { ssr: false });
+
+// Lazy load Recharts components
+const BarChart = dynamic(() => import('recharts').then(mod => mod.BarChart), { ssr: false });
+const Bar = dynamic(() => import('recharts').then(mod => mod.Bar), { ssr: false });
+const XAxis = dynamic(() => import('recharts').then(mod => mod.XAxis), { ssr: false });
+const YAxis = dynamic(() => import('recharts').then(mod => mod.YAxis), { ssr: false });
+const CartesianGrid = dynamic(() => import('recharts').then(mod => mod.CartesianGrid), { ssr: false });
+const Tooltip = dynamic(() => import('recharts').then(mod => mod.Tooltip), { ssr: false });
+const Legend = dynamic(() => import('recharts').then(mod => mod.Legend), { ssr: false });
+const ResponsiveContainer = dynamic(() => import('recharts').then(mod => mod.ResponsiveContainer), { ssr: false });
+const PieChart = dynamic(() => import('recharts').then(mod => mod.PieChart), { ssr: false });
+const Pie = dynamic(() => import('recharts').then(mod => mod.Pie), { ssr: false });
+const Cell = dynamic(() => import('recharts').then(mod => mod.Cell), { ssr: false });
+
 
 // Format metric names for display
 const formatMetricName = (key: string): string => {
@@ -39,9 +53,16 @@ const KPI_FILTER_OPTIONS = [
 
 const TOP_N_OPTIONS = [2, 3, 5, 10];
 
-// Only show batches that are completed and have documents
+// STRICT: Only show batches that are valid for comparison
+// Must be: completed, has documents, sufficiency > 0, overall_score != null
 const isValidBatch = (batch: BatchResponse): boolean => {
-    return batch.status === 'completed' && batch.total_documents >= 1;
+    // Basic checks
+    if (batch.status !== 'completed') return false;
+    if (batch.total_documents < 1) return false;
+
+    // Additional validation will be done by backend
+    // Frontend just filters out obvious invalid ones
+    return true;
 };
 
 function ComparePageContent() {
@@ -211,8 +232,8 @@ function ComparePageContent() {
         ? comparison.institutions.map((inst, idx) => {
             if (!inst || !inst.kpis) return null;
             const kpiValues = Object.values(inst.kpis).filter((v): v is number => typeof v === 'number' && !isNaN(v) && v > 0);
-            const avgScore = kpiValues.length > 0 
-                ? kpiValues.reduce((sum, val) => sum + val, 0) / kpiValues.length 
+            const avgScore = kpiValues.length > 0
+                ? kpiValues.reduce((sum, val) => sum + val, 0) / kpiValues.length
                 : 0;
             return {
                 name: inst.short_label || `Institution ${idx + 1}`,
@@ -270,16 +291,16 @@ function ComparePageContent() {
                                             key={batch.batch_id}
                                             onClick={() => toggleBatch(batch.batch_id)}
                                             className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${isSelected
-                                                    ? 'border-primary bg-primary-50'
-                                                    : 'border-gray-200 hover:border-primary-light bg-white'
+                                                ? 'border-primary bg-primary-50'
+                                                : 'border-gray-200 hover:border-primary-light bg-white'
                                                 }`}
                                         >
                                             <div className="flex items-start justify-between">
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2 mb-2">
                                                         <span className={`px-2 py-0.5 rounded text-xs font-semibold uppercase ${batch.mode === 'aicte' ? 'bg-primary-100 text-primary' :
-                                                                batch.mode === 'ugc' ? 'bg-accent-100 text-accent' :
-                                                                    'bg-purple-100 text-purple-600'
+                                                            batch.mode === 'ugc' ? 'bg-accent-100 text-accent' :
+                                                                'bg-purple-100 text-purple-600'
                                                             }`}>
                                                             {batch.mode}
                                                         </span>
@@ -631,8 +652,8 @@ function ComparePageContent() {
                                                         <td
                                                             key={inst.batch_id}
                                                             className={`text-center py-3 px-4 font-medium ${isMax ? 'text-green-600 bg-green-50' :
-                                                                    isMin ? 'text-red-500 bg-red-50' :
-                                                                        'text-gray-600'
+                                                                isMin ? 'text-red-500 bg-red-50' :
+                                                                    'text-gray-600'
                                                                 }`}
                                                         >
                                                             {val !== null ? (
@@ -776,8 +797,8 @@ function ComparePageContent() {
 
             {/* Chatbot - Show if we have at least one batch selected */}
             {selectedBatches.length > 0 && (
-                <Chatbot 
-                    batchId={selectedBatches[0]} 
+                <Chatbot
+                    batchId={selectedBatches[0]}
                     currentPage="compare"
                     comparisonBatchIds={selectedBatches.length >= 2 ? selectedBatches : undefined}
                 />

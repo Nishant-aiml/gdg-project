@@ -69,28 +69,31 @@ class TrendService:
             # Extract trend data from table text
             trend_data = self._extract_trend_tables(tables_text, mode)
             
-            # Require at least 2 data points for valid trends
-            if trend_data and len(trend_data) >= 2:
+            # Require at least 3 distinct years for valid trends (production requirement)
+            if trend_data and len(trend_data) >= 3:
                 # Group by year to count unique years
                 years = set()
                 for point in trend_data:
                     if point.get("year"):
                         years.add(str(point["year"]))
                 
-                if len(years) >= 2:
+                if len(years) >= 3:
                     return {
                         "has_trend_data": True,
                         "insufficient_data": False,
                         "trend_data": trend_data,
-                        "message": None
+                        "message": None,
+                        "years_count": len(years)
                     }
             
-            # Insufficient data
+            # Insufficient data - require minimum 3 years
+            years_count = len(set(point.get("year") for point in trend_data if point.get("year"))) if trend_data else 0
             return {
                 "has_trend_data": False,
                 "insufficient_data": True,
                 "trend_data": trend_data if trend_data else [],
-                "message": f"Insufficient data: found {len(trend_data) if trend_data else 0} data point(s), need at least 2 years"
+                "message": f"Insufficient data: found {years_count} distinct year(s), need at least 3 years for trends",
+                "years_count": years_count
             }
                 
         except Exception as e:

@@ -21,19 +21,43 @@ def get_kpi_details(batch_id: str, kpi_type: str) -> Dict[str, Any]:
     
     Args:
         batch_id: Batch ID
-        kpi_type: One of 'fsr', 'infrastructure', 'placement', 'lab', 'overall'
+        kpi_type: 
+            - AICTE: 'fsr', 'infrastructure', 'placement', 'lab', 'overall'
+            - NBA: 'peos_psos', 'faculty_quality', 'student_performance', 'continuous_improvement', 'co_po_mapping', 'overall'
+            - NAAC: 'criterion_1' through 'criterion_7', 'overall'
+            - NIRF: 'tlr', 'rp', 'go', 'oi', 'pr', 'overall'
     
     Returns:
         Detailed breakdown with parameters, evidence, calculation steps
     """
-    valid_types = ["fsr", "infrastructure", "placement", "lab", "overall"]
-    kpi_type_lower = kpi_type.lower().strip()
+    from config.database import get_db, Batch, close_db
     
-    if kpi_type_lower not in valid_types:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid KPI type. Must be one of: {', '.join(valid_types)}"
-        )
+    db = get_db()
+    try:
+        batch = db.query(Batch).filter(Batch.id == batch_id).first()
+        if not batch:
+            raise HTTPException(status_code=404, detail=f"Batch {batch_id} not found")
+        
+        mode = (batch.mode or "aicte").lower()
+        kpi_type_lower = kpi_type.lower().strip()
+        
+        # Mode-specific valid types
+        valid_types_map = {
+            "aicte": ["fsr", "infrastructure", "placement", "lab", "overall"],
+            "nba": ["peos_psos", "faculty_quality", "student_performance", "continuous_improvement", "co_po_mapping", "overall"],
+            "naac": [f"criterion_{i}" for i in range(1, 8)] + ["overall"],
+            "nirf": ["tlr", "rp", "go", "oi", "pr", "overall"]
+        }
+        
+        valid_types = valid_types_map.get(mode, valid_types_map["aicte"])
+        
+        if kpi_type_lower not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid KPI type for {mode.upper()} mode. Must be one of: {', '.join(valid_types)}"
+            )
+    finally:
+        close_db(db)
     
     try:
         result = get_kpi_detailed_breakdown(batch_id, kpi_type_lower)

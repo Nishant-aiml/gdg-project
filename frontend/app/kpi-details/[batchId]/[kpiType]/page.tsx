@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { dashboardApi, type KPIDetailsResponse, type KPIBreakdown } from '@/lib/api';
+import { kpiDetailsApi, type KPIDetailedResponse } from '@/lib/api';
 import toast from 'react-hot-toast';
 import {
     ArrowLeft, RefreshCw, CheckCircle, XCircle, AlertTriangle,
@@ -29,19 +29,22 @@ function KPIDetailsPage() {
     const batchId = params?.batchId as string;
     const kpiType = params?.kpiType as string;
 
-    const [details, setDetails] = useState<KPIDetailsResponse | null>(null);
+    const [details, setDetails] = useState<KPIDetailedResponse | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        if (batchId) {
+        if (batchId && kpiType) {
             fetchDetails();
         }
-    }, [batchId]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [batchId, kpiType]);
 
     const fetchDetails = async () => {
         setLoading(true);
         try {
-            const data = await dashboardApi.getKpiDetails(batchId);
+            // Use the correct endpoint: /kpi/details/{batchId}/{kpiType}
+            const normalizedType = KPI_MAP[kpiType?.toLowerCase() || ''] || 'overall';
+            const data = await kpiDetailsApi.get(batchId, normalizedType);
             setDetails(data);
         } catch (err) {
             console.error(err);
@@ -51,12 +54,6 @@ function KPIDetailsPage() {
         }
     };
 
-    // Get the specific KPI breakdown
-    const normalizedType = KPI_MAP[kpiType?.toLowerCase() || ''] || 'overall';
-    const kpiBreakdown: KPIBreakdown | null = details
-        ? (details as Record<string, KPIBreakdown | null>)[normalizedType]
-        : null;
-
     if (loading) {
         return (
             <div className="min-h-screen bg-gradient-soft flex items-center justify-center">
@@ -65,13 +62,15 @@ function KPIDetailsPage() {
         );
     }
 
-    if (!kpiBreakdown) {
+    if (!details || details.score === null) {
         return (
             <div className="min-h-screen bg-gradient-soft flex items-center justify-center">
                 <div className="text-center">
                     <XCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-                    <h2 className="text-xl font-semibold text-gray-800">KPI Not Found</h2>
-                    <p className="text-gray-600 mt-2">The requested KPI details are not available.</p>
+                    <h2 className="text-xl font-semibold text-gray-800">KPI Not Available</h2>
+                    <p className="text-gray-600 mt-2">
+                        {details?.formula ? 'Insufficient data to compute this KPI.' : 'The requested KPI details are not available.'}
+                    </p>
                     <button onClick={() => router.back()} className="mt-4 px-4 py-2 bg-primary text-white rounded-xl">
                         Go Back
                     </button>
@@ -89,35 +88,41 @@ function KPIDetailsPage() {
                         <ArrowLeft className="w-5 h-5 text-gray-600" />
                     </button>
                     <div>
-                        <h1 className="text-3xl font-bold text-gray-800">{kpiBreakdown.kpi_name}</h1>
-                        <p className="text-gray-600">{details?.institution_name} • {details?.mode.toUpperCase()}</p>
+                        <h1 className="text-3xl font-bold text-gray-800">{details.kpi_name}</h1>
+                        <p className="text-gray-600">Batch: {batchId.slice(-12)}</p>
                     </div>
                 </div>
 
                 {/* Score Summary */}
-                <div className="bg-white rounded-3xl shadow-soft-lg p-6 mb-8">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-sm text-gray-500">Final Score</p>
-                            <p className="text-4xl font-bold text-primary">{kpiBreakdown.final_score.toFixed(1)}</p>
-                            <p className="text-sm text-gray-500 mt-1">
-                                Data Quality:
-                                <span className={`ml-2 px-2 py-0.5 rounded text-xs font-medium ${kpiBreakdown.data_quality === 'complete' ? 'bg-green-100 text-green-700' :
-                                        kpiBreakdown.data_quality === 'partial' ? 'bg-yellow-100 text-yellow-700' :
-                                            'bg-red-100 text-red-700'
-                                    }`}>
-                                    {kpiBreakdown.data_quality.toUpperCase()}
-                                </span>
-                            </p>
-                        </div>
-                        <div className="w-24 h-24 rounded-full border-8 border-primary flex items-center justify-center">
-                            <span className="text-2xl font-bold text-primary">{kpiBreakdown.final_score.toFixed(0)}</span>
+                {details.score !== null ? (
+                    <div className="bg-white rounded-3xl shadow-soft-lg p-6 mb-8">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-sm text-gray-500">Final Score</p>
+                                <p className="text-4xl font-bold text-primary">{details.score.toFixed(1)}</p>
+                                <p className="text-sm text-gray-500 mt-1">
+                                    Formula: <code className="text-xs bg-gray-100 px-2 py-1 rounded">{details.formula}</code>
+                                </p>
+                            </div>
+                            <div className="w-24 h-24 rounded-full border-8 border-primary flex items-center justify-center">
+                                <span className="text-2xl font-bold text-primary">{details.score.toFixed(0)}</span>
+                            </div>
                         </div>
                     </div>
-                </div>
+                ) : (
+                    <div className="bg-amber-50 border border-amber-200 rounded-3xl shadow-soft-lg p-6 mb-8">
+                        <div className="flex items-center gap-3">
+                            <AlertTriangle className="w-6 h-6 text-amber-600" />
+                            <div>
+                                <h3 className="font-semibold text-amber-800">Insufficient Data</h3>
+                                <p className="text-sm text-amber-700 mt-1">This KPI cannot be computed due to missing required parameters.</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Missing Parameters Warning */}
-                {kpiBreakdown.missing_parameters.length > 0 && (
+                {details.parameters && details.parameters.filter(p => p.missing).length > 0 && (
                     <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-6">
                         <div className="flex items-start gap-3">
                             <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
@@ -127,9 +132,9 @@ function KPIDetailsPage() {
                                     The following parameters were not found in the documents:
                                 </p>
                                 <ul className="mt-2 flex flex-wrap gap-2">
-                                    {kpiBreakdown.missing_parameters.map(p => (
-                                        <li key={p} className="px-2 py-1 bg-amber-100 text-amber-800 rounded text-xs font-medium">
-                                            {p.replace(/_/g, ' ')}
+                                    {details.parameters.filter(p => p.missing).map((p, idx) => (
+                                        <li key={idx} className="px-2 py-1 bg-amber-100 text-amber-800 rounded text-xs font-medium">
+                                            {p.display_name || p.name}
                                         </li>
                                     ))}
                                 </ul>
@@ -158,24 +163,24 @@ function KPIDetailsPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {kpiBreakdown.parameters.map((param, idx) => (
+                                {details.parameters && details.parameters.map((param, idx) => (
                                     <tr key={idx} className={`border-b border-gray-50 ${param.missing ? 'bg-red-50' : ''}`}>
                                         <td className="py-3 px-4 font-medium text-gray-800">{param.display_name}</td>
                                         <td className="py-3 px-4 text-right text-gray-600">
-                                            {param.raw_value !== null ? String(param.raw_value) : <span className="text-gray-400">—</span>}
+                                            {param.extracted !== null ? String(param.extracted) : <span className="text-gray-400">—</span>}
                                             {param.unit && <span className="text-xs text-gray-400 ml-1">{param.unit}</span>}
                                         </td>
                                         <td className="py-3 px-4 text-right text-gray-600">
-                                            {param.normalized_value !== null ? param.normalized_value.toFixed(2) : <span className="text-gray-400">—</span>}
+                                            {typeof param.norm === 'number' ? param.norm.toFixed(2) : param.norm || <span className="text-gray-400">—</span>}
                                         </td>
                                         <td className="py-3 px-4 text-right text-gray-600">
                                             {(param.weight * 100).toFixed(0)}%
                                         </td>
                                         <td className="py-3 px-4 text-right font-medium text-gray-800">
-                                            {param.score.toFixed(1)}
+                                            {param.contrib !== null ? param.contrib.toFixed(1) : <span className="text-gray-400">—</span>}
                                         </td>
                                         <td className="py-3 px-4 text-right font-semibold text-primary">
-                                            {param.contribution.toFixed(2)}
+                                            {param.contrib !== null ? param.contrib.toFixed(2) : <span className="text-gray-400">—</span>}
                                         </td>
                                         <td className="py-3 px-4 text-center">
                                             {param.missing ? (
@@ -198,10 +203,10 @@ function KPIDetailsPage() {
                         Computation Steps
                     </h2>
                     <div className="space-y-4">
-                        {kpiBreakdown.formula_steps.map((step) => (
-                            <div key={step.step_number} className="flex items-start gap-4 p-4 bg-gray-50 rounded-xl">
+                        {details.calculation_steps && details.calculation_steps.map((step, idx) => (
+                            <div key={idx} className="flex items-start gap-4 p-4 bg-gray-50 rounded-xl">
                                 <div className="w-8 h-8 bg-primary text-white rounded-full flex items-center justify-center font-bold flex-shrink-0">
-                                    {step.step_number}
+                                    {step.step || idx + 1}
                                 </div>
                                 <div className="flex-1">
                                     <p className="font-medium text-gray-800">{step.description}</p>
@@ -220,18 +225,27 @@ function KPIDetailsPage() {
                 </div>
 
                 {/* Formula Text */}
-                <div className="bg-gradient-to-r from-primary to-primary-light rounded-3xl p-6 text-white">
-                    <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                        <TrendingUp className="w-6 h-6" />
-                        Complete Formula
-                    </h2>
-                    <code className="block bg-white/20 p-4 rounded-xl font-mono text-lg">
-                        {kpiBreakdown.formula_text}
-                    </code>
-                    <p className="text-sm mt-4 opacity-80">
-                        Confidence: {(kpiBreakdown.confidence * 100).toFixed(0)}%
-                    </p>
-                </div>
+                {details.formula && (
+                    <div className="bg-gradient-to-r from-primary to-primary-light rounded-3xl p-6 text-white">
+                        <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                            <TrendingUp className="w-6 h-6" />
+                            Complete Formula
+                        </h2>
+                        <code className="block bg-white/20 p-4 rounded-xl font-mono text-lg">
+                            {details.formula}
+                        </code>
+                        {details.included_kpis && details.included_kpis.length > 0 && (
+                            <p className="text-sm mt-4 opacity-80">
+                                Included KPIs: {details.included_kpis.join(', ')}
+                            </p>
+                        )}
+                        {details.excluded_kpis && details.excluded_kpis.length > 0 && (
+                            <p className="text-sm mt-2 opacity-80">
+                                Excluded (missing): {details.excluded_kpis.join(', ')}
+                            </p>
+                        )}
+                    </div>
+                )}
             </div>
         </div>
     );

@@ -3,6 +3,7 @@ import "./globals.css";
 import { Toaster } from "react-hot-toast";
 import Navbar from "@/components/Navbar";
 import PWAClient from "@/components/PWAClient";
+import { AuthProvider } from "@/components/AuthProvider";
 
 export const metadata: Metadata = {
   title: "Smart Approval AI - AICTE/UGC Evaluation System",
@@ -24,11 +25,12 @@ export default function RootLayout({
         <meta name="theme-color" content="#0f172a" />
       </head>
       <body className="bg-gradient-soft min-h-screen" suppressHydrationWarning>
-        <PWAClient />
-        <Navbar />
-        <main className="pt-16">
-          {children}
-        </main>
+        <AuthProvider>
+          <PWAClient />
+          <Navbar />
+          <main className="pt-16">
+            {children}
+          </main>
         <Toaster
           position="top-right"
           toastOptions={{
@@ -54,6 +56,7 @@ export default function RootLayout({
             },
           }}
         />
+        </AuthProvider>
       </body>
     </html>
   );

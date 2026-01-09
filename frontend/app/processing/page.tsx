@@ -25,11 +25,15 @@ function ProcessingPageContent() {
         setStatus(statusData);
         setLoading(false);
 
-        if (statusData.status === 'completed') {
+        // Check both status and current_stage for completion
+        const isCompleted = statusData.status === 'completed' || statusData.current_stage === 'completed';
+        const isFailed = statusData.status === 'failed' || statusData.current_stage === 'failed';
+        
+        if (isCompleted) {
           setTimeout(() => {
             router.push(`/dashboard?batch_id=${batchId}`);
           }, 2000);
-        } else if (statusData.status === 'failed') {
+        } else if (isFailed) {
           console.error('Processing failed:', statusData.errors);
           // Don't auto-redirect on failure - let user see the error
           // setTimeout(() => {
@@ -67,7 +71,9 @@ function ProcessingPageContent() {
     { key: 'completed', label: 'Completed', description: 'Analysis complete!', icon: Sparkles, progress: 100 },
   ];
 
-  const currentStageIndex = stages.findIndex((s) => s.key === status?.status);
+  // Use current_stage from backend, fallback to status
+  const currentStage = status?.current_stage || status?.status || 'created';
+  const currentStageIndex = stages.findIndex((s) => s.key === currentStage);
   const activeIndex = currentStageIndex >= 0 ? currentStageIndex : 0;
 
   if (loading) {
@@ -200,7 +206,7 @@ function ProcessingPageContent() {
         </div>
 
         {/* Status Messages */}
-        {status?.status === 'completed' && (
+        {(status?.status === 'completed' || status?.current_stage === 'completed') && (
           <div className="mt-8 text-center animate-fade-in">
             <div className="inline-flex items-center gap-3 px-6 py-4 bg-secondary-50 border border-secondary rounded-2xl">
               <CheckCircle className="w-6 h-6 text-secondary" />
@@ -211,7 +217,7 @@ function ProcessingPageContent() {
           </div>
         )}
 
-        {status?.status === 'failed' && (
+        {(status?.status === 'failed' || status?.current_stage === 'failed') && (
           <div className="mt-8 text-center animate-fade-in">
             <div className="inline-flex items-center gap-3 px-6 py-4 bg-red-50 border border-red-300 rounded-2xl">
               <span className="text-red-600 font-semibold">

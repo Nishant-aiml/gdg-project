@@ -261,15 +261,11 @@ If you don't know, say so."""
             # Use provided system prompt and message as user content
             user_content = message
 
-        # Map custom model names to real OpenAI models if needed
-        model_mapping = {
-            "gpt-5-nano": "gpt-4o-mini",  # Use GPT-4o-mini as replacement
-            "gpt-5-mini": "gpt-4o-mini",  # Use GPT-4o-mini as replacement
-        }
+        # gpt-5-nano and gpt-5-mini are valid OpenAI models (released August 2025)
+        actual_primary = self.primary_model
+        actual_fallback = self.fallback_model
         
-        actual_primary = model_mapping.get(self.primary_model, self.primary_model)
-        actual_fallback = model_mapping.get(self.fallback_model, self.fallback_model)
-        
+
         try:
             # Explicitly use primary model for chatbot
             logger.info(f"Calling {actual_primary} (configured as {self.primary_model}) for chatbot query")

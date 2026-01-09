@@ -8,11 +8,20 @@ docling>=1.0.0
 paddleocr>=2.7.0
 pdf2image>=1.16.0
 pypdf==3.17.0
+PyPDF2>=3.0.0
 Pillow==10.1.0
-pydantic==2.5.0
-pydantic-settings==2.1.0
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
 aiofiles==23.2.1
 weasyprint==60.1
 jinja2==3.1.2
 httpx==0.25.2
+google-generativeai>=0.3.0
+google-cloud-vision>=3.0.0
+google-cloud-firestore>=2.0.0
+google-cloud-storage>=2.0.0
+firebase-admin>=6.0.0
+pymongo>=4.0.0
+psycopg2-binary>=2.9.0  # PostgreSQL driver for Supabase
+reportlab>=4.0.0  # PDF generation
 

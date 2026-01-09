@@ -79,21 +79,21 @@ class DoclingService:
                     "error": "Invalid or corrupted PDF file"
                 }
 
-            # Convert document with timeout protection (15 seconds max)
+            # PERFORMANCE: Convert document with timeout protection (30s max) and retry logic
             from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+            from utils.parsing_retry import retry_parsing_with_timeout
             
-            def run_docling():
+            @retry_parsing_with_timeout(timeout_seconds=30.0, max_retries=1)
+            def run_docling_with_retry():
                 return self.converter.convert(filepath)
             
             try:
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(run_docling)
-                    result = future.result(timeout=15)  # 15 second timeout
-            except FuturesTimeoutError:
-                logger.warning(f"⏱️ Docling parsing timed out after 15s for {filepath}, using fallback...")
+                result = run_docling_with_retry()
+            except (FuturesTimeoutError, TimeoutError):
+                logger.warning(f"⏱️ Docling parsing timed out after 30s for {filepath}, using fallback...")
                 return self._fallback_extraction(filepath)
             except Exception as docling_err:
-                logger.warning(f"Docling conversion failed: {docling_err}, using fallback...")
+                logger.warning(f"Docling conversion failed after retries: {docling_err}, using fallback...")
                 return self._fallback_extraction(filepath)
             
             doc = result.document

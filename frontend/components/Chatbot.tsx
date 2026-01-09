@@ -6,7 +6,7 @@ import { chatbotApi, ChatQueryResponse } from '@/lib/api';
 import ReactMarkdown from 'react-markdown';
 
 interface ChatbotProps {
-  batchId: string;
+  batchId?: string;  // Optional - for accreditation context
   currentPage?: string;
   comparisonBatchIds?: string[];
 }

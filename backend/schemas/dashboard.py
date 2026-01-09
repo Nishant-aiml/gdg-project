@@ -85,4 +85,8 @@ class DashboardResponse(BaseModel):
     processed_documents: int
     approval_classification: Optional[ApprovalClassification] = None
     approval_readiness: Optional[ApprovalReadiness] = None
+    batch_status: Optional[str] = None  # For invalid batch detection
+    overall_score: Optional[float] = None  # For invalid batch detection
+    is_invalid: bool = False  # True if batch has insufficient data
+    invalid_reason: Optional[str] = None  # Reason for invalid status
 

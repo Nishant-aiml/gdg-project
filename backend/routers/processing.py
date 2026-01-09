@@ -2,10 +2,12 @@
 Processing pipeline router - SQLite version
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from typing import Optional
 from schemas.processing import ProcessingStatusResponse, ProcessingStartRequest, ProcessingStartResponse
 from pipelines.block_processing_pipeline import BlockProcessingPipeline
 from config.database import get_db, Batch, File, close_db
+from middleware.auth_middleware import get_current_user
 from datetime import datetime
 import threading
 import logging
@@ -18,7 +20,8 @@ pipeline = BlockProcessingPipeline()
 @router.post("/start", response_model=ProcessingStartResponse)
 def start_processing(
     request: ProcessingStartRequest,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    user: Optional[dict] = Depends(get_current_user)
 ):
     """Start processing a batch"""
     db = get_db()
@@ -71,10 +74,32 @@ def start_processing(
         close_db(db)
 
 @router.get("/status/{batch_id}", response_model=ProcessingStatusResponse)
-def get_processing_status(batch_id: str):
+def get_processing_status(
+    batch_id: str,
+    user: Optional[dict] = Depends(get_current_user)
+):
     """Get processing status for a batch"""
     if batch_id == "undefined" or not batch_id:
         raise HTTPException(status_code=400, detail="Invalid batch_id")
+    
+    # DEMO MODE: Return completed status for demo batches
+    if batch_id.startswith("demo-batch-"):
+        demo_mode_map = {
+            "demo-batch-aicte-2024": "aicte",
+            "demo-batch-ugc-2024": "ugc",
+            "demo-batch-mixed-2024": "mixed",
+            "demo-batch-old": "aicte"
+        }
+        mode = demo_mode_map.get(batch_id, "aicte")
+        return ProcessingStatusResponse(
+            batch_id=batch_id,
+            status="completed",
+            current_stage="Completed",
+            progress=100,
+            total_documents=5,
+            processed_documents=5,
+            errors=[]
+        )
     
     db = get_db()
     
@@ -111,24 +136,26 @@ def get_processing_status(batch_id: str):
         stage_map = {
             "created": "Ready",
             "docling_parsing": "Extracting using Docling...",
-            "ocr_fallback": "Running OCR on scanned pages...",        # NEW
-            "section_extraction": "Extracting relevant sections...",  # NEW
+            "ocr_fallback": "Running OCR on scanned pages...",
+            "section_extraction": "Extracting relevant sections...",
             "classify_approval": "Classifying approval category...",
             "snippet_extraction": "Filtering block snippets...",
             "one_shot_extraction": "One-shot AI extraction...",
-            "block_mapping": "Mapping blocks to schema...",            # NEW
+            "block_mapping": "Mapping blocks to schema...",
             "storing_blocks": "Storing blocks...",
             "quality_check": "Quality Check",
             "sufficiency": "Sufficiency",
             "kpi_scoring": "Running KPI engine...",
             "compliance": "Compliance Check",
-            "approval_classification": "Classifying approval type...", # NEW
+            "approval_classification": "Classifying approval type...",
             "approval_readiness": "Approval readiness...",
             "trend_analysis": "Trend Analysis",
             "completed": "Completed",
             "failed": "Failed"
         }
-        current_stage = stage_map.get(batch.status, batch.status)
+        # IMPORTANT: Return the status key (not description) as current_stage
+        # Frontend uses this to match against its stages array for visual progress
+        current_stage = batch.status
         
         return ProcessingStatusResponse(
             batch_id=batch_id,

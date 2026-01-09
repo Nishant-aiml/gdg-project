@@ -6,6 +6,7 @@ Provides intelligent responses based on real extracted data.
 import logging
 from typing import Dict, Any, List, Optional
 from ai.openai_client import OpenAIClient
+from ai.gemini_client import GeminiClient
 import json
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,9 @@ logger = logging.getLogger(__name__)
 
 class ChatbotService:
     def __init__(self):
-        self.ai_client = OpenAIClient()
+        # Use Gemini as primary (free tier), GPT-5 Nano as fallback 1, GPT-5 Mini as fallback 2
+        self.gemini_client = GeminiClient()
+        self.openai_client = None  # Initialize lazily only if needed
     
     def build_context(
         self,
@@ -162,63 +165,167 @@ class ChatbotService:
         
         return formulas
     
-    def build_system_prompt(self, mode: str, formulas: Dict[str, str]) -> str:
+    def build_system_prompt(self, mode: str, formulas: Dict[str, str] = None, batch_id: str = None) -> str:
         """
-        Build system prompt for the chatbot.
+        Build system prompt for the chatbot with STRICT grounding rules.
         """
-        return f"""You are the Smart Approval AI Chat Assistant for the {mode.upper()} evaluation dashboard.
+        batch_context = f" for batch {batch_id}" if batch_id else ""
+        formulas_text = json.dumps(formulas, indent=2) if formulas else "{}"
+        
+        return f"""You are a regulatory assistant for the {mode.upper()} evaluation dashboard{batch_context}.
 
-CRITICAL RULES:
-1. You MUST ONLY answer questions related to:
-   - This evaluation platform and dashboard
-   - AICTE/UGC guidelines and norms
-   - KPI scoring (FSR, Infrastructure, Placement, Lab Index, etc.)
-   - Document blocks extracted from uploaded files
-   - Approval classification (new/renewal, AICTE/UGC/Mixed)
-   - Required documents and approval readiness
-   - Unified AICTE+UGC reports
-   - Institution comparison results
-   - Trends and forecasts
+CRITICAL RULE - YOU MUST FOLLOW THIS STRICTLY:
+You may ONLY explain values returned by backend APIs. You must never infer, estimate, or fabricate.
+
+ABSOLUTE REQUIREMENTS:
+
+1. DATA GROUNDING - MANDATORY:
+   - You may ONLY use values returned by backend APIs. Never infer.
+   - You MUST use ONLY the provided context data. NEVER hallucinate or make up numbers.
+   - If a KPI value is None or missing, say "Insufficient data to explain this score" - do NOT guess.
+   - If a document is missing, reference the exact missing_documents list from approval_readiness.
+   - If data is not in context, say: "This information is not available in your uploaded documents for this batch."
 
 2. STRICT SCOPE ENFORCEMENT:
-   - If the user asks about general topics (weather, news, other websites, unrelated topics), 
-     immediately reply: "I can only answer questions related to your institution evaluation dashboard."
-   - Do NOT answer questions about: general knowledge, other institutions (unless in comparison context),
+   - You MUST ONLY answer questions related to THIS batch ({batch_id}):
+     - KPI scores for THIS batch (from /api/kpi/details endpoint)
+     - Document blocks extracted from THIS batch's uploaded files
+     - Approval classification for THIS batch
+     - Required documents and approval readiness for THIS batch
+     - Comparison results (if THIS batch is included)
+     - Trends and forecasts for THIS batch
+   - If the user asks about general topics, policy, hypothetical scenarios, or other batches:
+     immediately reply: "I can only answer questions about your current batch data. I cannot provide policy advice, hypothetical scenarios, or information about other batches."
+   - Do NOT answer questions about: general knowledge, policy recommendations, other institutions (unless in comparison context),
      unrelated educational topics, or anything outside this platform.
-   - ONLY answer questions about: this dashboard, uploaded documents, KPIs, approval status, 
-     comparison results, trends from this data, and AICTE/UGC norms.
 
-3. DATA ACCURACY - CRITICAL:
-   - You MUST use ONLY the provided context data. NEVER hallucinate or make up numbers.
-   - If a KPI value is None or missing, say "This KPI could not be calculated" - do NOT guess.
-   - If a document is missing, reference the exact missing_documents list from approval_readiness.
-   - If data is not in context, say: "This information is not available in your uploaded documents."
+3. REFUSE THESE QUESTIONS:
+   - Policy questions: "What is the policy on X?" → Refuse
+   - Hypothetical: "What if I had X?" → Refuse
+   - Other batches: "What about batch Y?" → Refuse
+   - General advice: "What should I do?" → Refuse
+   - Only answer: "What is my X score?" (current batch), "Explain my X score" (current batch), "What documents are missing?" (current batch)
 
-4. If information is missing from the context, reply with:
-   "This information is not available in your uploaded documents."
+4. KPI EXPLANATIONS (explain_score intent):
+   - When explaining KPIs, use ONLY the exact data from /api/kpi/details endpoint:
+     - Formula text (exactly as returned)
+     - Parameters (exactly as returned)
+     - Weights (exactly as returned)
+     - Evidence snippets and page numbers (exactly as returned)
+   - Do NOT add your own calculations or interpretations.
+   - Do NOT summarize or rephrase the formula.
+   - Reference evidence snippets and page numbers when available.
 
-5. When explaining KPIs, use the exact formulas provided:
-{json.dumps(formulas, indent=2)}
+5. MISSING DATA HANDLING:
+   - If information is missing from the API response, reply with:
+     "Insufficient data to explain this score."
+   - Never make up, infer, estimate, or fabricate missing values.
 
-6. When explaining missing documents, reference the approval_readiness data.
-
-7. When explaining comparison results, reference the comparison_data.
-
-8. Format your responses in clear, professional markdown.
+6. RESPONSE FORMAT:
+   - Use clear, professional markdown
    - Use bullet points for lists
    - Use **bold** for important metrics
-   - Use code blocks for formulas
+   - Use code blocks for formulas (exactly as returned by API)
    - Use tables when appropriate
+   - Always cite which API endpoint provided the data (e.g., "Based on /api/kpi/details response..." or "According to your extracted blocks...")
 
-9. Always cite which data source you're using (e.g., "Based on your KPI results..." or "According to your extracted blocks...").
-
-10. Be concise but thorough. Provide actionable insights when possible."""
+7. BE CONCISE but thorough. Provide actionable insights when possible, but ONLY from API-returned data."""
+    
+    def format_score_explanation(
+        self,
+        kpi_name: str,
+        kpi_details: Dict[str, Any],
+        mode: str
+    ) -> Dict[str, Any]:
+        """
+        Format KPI score explanation from REAL backend data.
+        NO hallucination - only uses returned KPI details.
+        """
+        score = kpi_details.get("score")
+        formula_text = kpi_details.get("formula_text", "")
+        parameters = kpi_details.get("parameters", [])
+        formula_steps = kpi_details.get("formula_steps", [])
+        evidence = kpi_details.get("evidence", {})
+        
+        if score is None:
+            return {
+                "answer": f"This score cannot be explained due to insufficient verified data for '{kpi_name}'.",
+                "citations": ["KPI Details API"],
+                "related_blocks": [],
+                "requires_context": False
+            }
+        
+        # Build explanation from real data
+        explanation = f"## Explanation of {kpi_name.upper()} Score\n\n"
+        explanation += f"**Score**: {score:.2f}\n\n"
+        
+        if formula_text:
+            explanation += f"**Formula**: {formula_text}\n\n"
+        
+        if parameters:
+            explanation += "### Parameters Breakdown:\n\n"
+            for param in parameters:
+                # Support both kpi_details.py schema (parameter_name) and kpi_detailed.py schema (name, display_name)
+                param_name = param.get("display_name") or param.get("parameter_name") or param.get("name") or "Unknown"
+                # Support both raw_value and extracted
+                raw_value = param.get("raw_value") if param.get("raw_value") is not None else param.get("extracted")
+                # Support both normalized_value and score
+                normalized_value = param.get("normalized_value") if param.get("normalized_value") is not None else param.get("score")
+                # Support both contribution and contrib
+                contribution = param.get("contribution") or param.get("contrib") or 0
+                param_evidence = param.get("evidence", {})
+                
+                explanation += f"- **{param_name}**:\n"
+                if raw_value is not None:
+                    explanation += f"  - Raw Value: {raw_value}\n"
+                if normalized_value is not None:
+                    if isinstance(normalized_value, (int, float)):
+                        explanation += f"  - Normalized Score: {normalized_value:.2f}\n"
+                    else:
+                        explanation += f"  - Normalized Score: {normalized_value}\n"
+                if contribution and contribution > 0:
+                    if isinstance(contribution, (int, float)):
+                        explanation += f"  - Contribution: {contribution:.2f}\n"
+                    else:
+                        explanation += f"  - Contribution: {contribution}\n"
+                
+                # Add evidence if available
+                if param_evidence.get("snippet"):
+                    snippet = param_evidence["snippet"][:200]  # Truncate long snippets
+                    page = param_evidence.get("page", "N/A")
+                    explanation += f"  - Evidence: \"{snippet}...\" (Page {page})\n"
+                
+                explanation += "\n"
+        
+        if formula_steps:
+            explanation += "### Calculation Steps:\n\n"
+            for step in formula_steps:
+                step_desc = step.get("description", "")
+                step_result = step.get("result")
+                if step_desc:
+                    explanation += f"{step.get('step', 1)}. {step_desc}\n"
+                    if step_result is not None:
+                        explanation += f"   Result: {step_result:.2f}\n"
+                explanation += "\n"
+        
+        # Add data quality note
+        data_quality = kpi_details.get("data_quality", "unknown")
+        if data_quality == "incomplete":
+            explanation += "\n⚠️ **Note**: This score is based on incomplete data. Some parameters may be missing.\n"
+        
+        return {
+            "answer": explanation,
+            "citations": ["KPI Details API", "Evidence Tracker"],
+            "related_blocks": [],
+            "requires_context": False
+        }
     
     def generate_response(
         self,
         query: str,
         context: Dict[str, Any],
-        mode: str
+        mode: str,
+        batch_id: str = None
     ) -> Dict[str, Any]:
         """
         Generate chatbot response with citations.
@@ -226,8 +333,8 @@ CRITICAL RULES:
         # Get formulas
         formulas = self.get_kpi_formulas(mode)
         
-        # Build system prompt
-        system_prompt = self.build_system_prompt(mode, formulas)
+        # Build system prompt with strict grounding
+        system_prompt = self.build_system_prompt(mode, formulas, batch_id)
         
         # Build user prompt with context
         context_json = json.dumps(context, indent=2, default=str)
@@ -242,10 +349,28 @@ If the question is outside the platform scope, politely redirect.
 If data is missing, state that clearly.
 If explaining KPIs, use the formulas provided in the system prompt."""
 
-        # Generate response using GPT-5 Nano
+        # Generate response using Gemini (primary) or OpenAI (fallback)
         try:
+            # Try Gemini first (free tier)
+            if self.gemini_client.available:
+                logger.info(f"Generating chatbot response using Gemini for mode: {mode}, query length: {len(query)}")
+                try:
+                    result = self.gemini_client.generate_chat_response(
+                        query=query,
+                        context=context,
+                        system_prompt=system_prompt
+                    )
+                    logger.info("Chatbot response generated successfully using Gemini")
+                    return result
+                except Exception as gemini_err:
+                    logger.warning(f"Gemini failed: {gemini_err}, falling back to OpenAI")
+                    # Fall through to OpenAI fallback
+            
+            # Fallback 1: OpenAI GPT-5 Nano
+            if not self.openai_client:
+                self.openai_client = OpenAIClient()
+            
             # Truncate context if too large (OpenAI has token limits)
-            # Keep essential data but limit block_data size
             context_size = len(context_json)
             if context_size > 50000:  # Roughly 12k tokens, leave room for prompt
                 logger.warning(f"Context is large ({context_size} chars), truncating block_data")
@@ -257,16 +382,17 @@ If explaining KPIs, use the formulas provided in the system prompt."""
                     context["block_data"][block_type] = truncated
                 context_json = json.dumps(context, indent=2, default=str)
             
-            # Use gpt-4o-mini specifically for chatbot (not the global model)
-            # This keeps extraction using gpt-5-nano while chatbot uses a real OpenAI model
-            logger.info(f"Generating chatbot response using gpt-4o-mini for mode: {mode}, query length: {len(query)}")
+            logger.info(f"Generating chatbot response using GPT-5 Nano (fallback 1) for mode: {mode}, query length: {len(query)}")
             logger.debug(f"Context size: {len(context_json)} characters")
             
-            # Make direct OpenAI API call with gpt-4o-mini
-            CHATBOT_MODEL = "gpt-4o-mini"
+            # Try GPT-5 Nano first (fallback 1)
+            from config.settings import settings
+            CHATBOT_MODEL_PRIMARY = settings.OPENAI_MODEL_PRIMARY  # "gpt-5-nano"
+            CHATBOT_MODEL_FALLBACK = settings.OPENAI_MODEL_FALLBACK  # "gpt-5-mini"
+            
             try:
-                response = self.ai_client.client.chat.completions.create(
-                    model=CHATBOT_MODEL,
+                response = self.openai_client.client.chat.completions.create(
+                    model=CHATBOT_MODEL_PRIMARY,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
@@ -276,25 +402,29 @@ If explaining KPIs, use the formulas provided in the system prompt."""
                     timeout=60
                 )
                 response_text = response.choices[0].message.content
-            except Exception as direct_err:
-                logger.warning(f"gpt-4o-mini failed: {direct_err}, trying fallback")
-                # Fallback to gpt-3.5-turbo if gpt-4o-mini fails
-                response = self.ai_client.client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.3,
-                    max_tokens=1500,
-                    timeout=60
-                )
-                response_text = response.choices[0].message.content
+                logger.info(f"Chatbot response generated successfully using {CHATBOT_MODEL_PRIMARY}")
+            except Exception as nano_err:
+                logger.warning(f"{CHATBOT_MODEL_PRIMARY} failed: {nano_err}, trying {CHATBOT_MODEL_FALLBACK} (extremely last case)")
+                # Fallback 2: GPT-5 Mini (extremely last case)
+                try:
+                    response = self.openai_client.client.chat.completions.create(
+                        model=CHATBOT_MODEL_FALLBACK,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        temperature=0.3,
+                        max_tokens=1500,
+                        timeout=60
+                    )
+                    response_text = response.choices[0].message.content
+                    logger.info(f"Chatbot response generated successfully using {CHATBOT_MODEL_FALLBACK} (extremely last case)")
+                except Exception as mini_err:
+                    logger.error(f"All AI models failed: {CHATBOT_MODEL_PRIMARY} -> {nano_err}, {CHATBOT_MODEL_FALLBACK} -> {mini_err}")
+                    raise ValueError(f"All chatbot models failed. Last error: {mini_err}")
             
             if not response_text or len(response_text.strip()) == 0:
                 raise ValueError("Empty response from AI client")
-            
-            logger.info("Chatbot response generated successfully using gpt-4o-mini")
             
             # Extract citations and related blocks
             citations = self._extract_citations(response_text, context)

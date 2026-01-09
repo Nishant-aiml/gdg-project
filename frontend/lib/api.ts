@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000/api';
 
-const api = axios.create({
+export const api = axios.create({
   baseURL: API_BASE,
   timeout: 60000, // 60 second timeout for chatbot (can take longer)
   headers: {
@@ -57,8 +57,11 @@ api.interceptors.response.use(
 
 // Types
 export interface BatchCreate {
-  mode: 'aicte' | 'ugc' | 'mixed';
+  mode: 'aicte' | 'nba' | 'naac' | 'nirf';
   new_university?: boolean;
+  institution_name?: string;
+  department_name?: string;
+  academic_year?: string;
 }
 
 export interface BatchResponse {
@@ -154,6 +157,8 @@ export interface DashboardResponse {
   processed_documents: number;
   approval_classification?: ApprovalClassification | null;
   approval_readiness?: ApprovalReadiness | null;
+  batch_status?: string;  // For invalid batch detection
+  overall_score?: number | null;  // For invalid batch detection
 }
 
 export interface ChatMessage {
@@ -168,7 +173,7 @@ export interface ChatResponse {
 
 export interface ChatQueryRequest {
   query: string;
-  batch_id: string;
+  batch_id?: string;  // Optional - for accreditation context
   current_page?: string;
   comparison_batch_ids?: string[];
 }
@@ -321,17 +326,49 @@ export const processingApi = {
   },
 };
 
+export interface Evaluation {
+  batch_id: string;
+  academic_year: string | null;
+  mode: string;
+  institution_name: string | null;
+  department_name: string | null;
+  overall_score: number | null;
+  created_at: string | null;
+  total_documents: number;
+}
+
 export const dashboardApi = {
+  listEvaluations: async (params?: {
+    academic_year?: string;
+    mode?: string;
+    department_name?: string;
+  }): Promise<Evaluation[]> => {
+    const queryParams = new URLSearchParams();
+    if (params?.academic_year) queryParams.append('academic_year', params.academic_year);
+    if (params?.mode) queryParams.append('mode', params.mode);
+    if (params?.department_name) queryParams.append('department_name', params.department_name);
+    
+    const url = `/dashboard/evaluations${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+    const response = await api.get<Evaluation[]>(url);
+    return response.data;
+  },
   get: async (batchId: string): Promise<DashboardResponse> => {
     const response = await api.get<DashboardResponse>(`/dashboard/${batchId}`);
     return response.data;
   },
-  getKpiDetails: async (batchId: string): Promise<KPIDetailsResponse> => {
-    const response = await api.get<KPIDetailsResponse>(`/dashboard/kpi-details/${batchId}`);
+  getKpiDetails: async (batchId: string, kpiType: string): Promise<KPIDetailsResponse> => {
+    // Backend endpoint: /api/dashboard/kpi-details/{batch_id}?kpi_type={kpi_type}
+    const response = await api.get<KPIDetailsResponse>(`/dashboard/kpi-details/${batchId}`, {
+      params: { kpi_type: kpiType }
+    });
     return response.data;
   },
   getTrends: async (batchId: string): Promise<YearwiseTrendsResponse> => {
     const response = await api.get<YearwiseTrendsResponse>(`/dashboard/trends/${batchId}`);
+    return response.data;
+  },
+  getForecast: async (batchId: string, kpiName: string): Promise<ForecastResponse> => {
+    const response = await api.get<ForecastResponse>(`/dashboard/forecast/${batchId}/${kpiName}`);
     return response.data;
   },
 };
@@ -352,6 +389,32 @@ export interface YearwiseTrendsResponse {
   kpis_per_year: Record<string, Record<string, number | null>>;
   trends: Record<string, KPITrendInfo>;
   has_historical_data: boolean;
+}
+
+// Forecast Types
+export interface ForecastPoint {
+  year: number;
+  predicted_value: number;
+  lower_bound: number;
+  upper_bound: number;
+  confidence?: number;
+}
+
+export interface ForecastResponse {
+  has_forecast?: boolean;
+  can_forecast?: boolean;
+  insufficient_data?: boolean;
+  insufficient_data_reason?: string | null;
+  forecast: ForecastPoint[] | null;
+  confidence_band?: number;
+  explanation?: string | null;
+  model_info?: {
+    method: string;
+    slope: number;
+    intercept: number;
+    r_squared: number;
+    historical_points: number;
+  };
 }
 
 // KPI Details Types
@@ -414,6 +477,8 @@ export const chatbotApi = {
     return response.data;
   },
 };
+
+// GovEasy API removed - feature not needed
 
 export const reportApi = {
   generate: async (batchId: string, reportType: string = 'standard'): Promise<ReportGenerateResponse> => {
@@ -489,6 +554,8 @@ export interface ApprovalResponse {
   document_details: DocumentStatus[];
   readiness_score: number;
   recommendation: string;
+  present: number;
+  required: number;
 }
 
 export const approvalApi = {
@@ -646,7 +713,10 @@ export interface KPIDetailedResponse {
 
 export const kpiDetailsApi = {
   get: async (batchId: string, kpiType: string): Promise<KPIDetailedResponse> => {
-    const response = await api.get<KPIDetailedResponse>(`/kpi/details/${batchId}/${kpiType}`);
+    // Backend endpoint: /api/dashboard/kpi-details/{batch_id}?kpi_type={kpi_type}
+    const response = await api.get<KPIDetailedResponse>(`/dashboard/kpi-details/${batchId}`, {
+      params: { kpi_type: kpiType }
+    });
     return response.data;
   },
 };

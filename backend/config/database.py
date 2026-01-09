@@ -1,6 +1,6 @@
 """
-SQLite database connection and configuration
-Temporary storage only - no historical data
+Database connection and configuration
+Supports PostgreSQL (Supabase) and SQLite (fallback for development)
 """
 
 from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Text, JSON, Index
@@ -13,33 +13,132 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# SQLite database path
-DB_DIR = Path(__file__).parent.parent / "storage" / "db"
-DB_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DB_DIR / "temp_batches.db"
+# Check for PostgreSQL connection string (Supabase)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Create engine
-engine = create_engine(
-    f"sqlite:///{DB_PATH}",
-    connect_args={"check_same_thread": False},  # Needed for SQLite
-    echo=False
-)
+if DATABASE_URL:
+    # Use PostgreSQL (Supabase)
+    # PostgreSQL connection string format: postgresql://user:password@host:port/database
+    # Supabase format: postgresql://postgres:password@db.xxx.supabase.co:5432/postgres
+    logger.info("Using PostgreSQL database (Supabase)")
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,  # Verify connections before using
+        pool_size=5,  # Connection pool size
+        max_overflow=10,  # Max connections beyond pool_size
+        echo=False
+    )
+    DB_TYPE = "postgresql"
+else:
+    # SQLite for production (WAL mode for better concurrency)
+    logger.info("Using SQLite database with WAL mode (production)")
+    
+    # Use /data/app.db for production (Railway), or local path for development
+    PRODUCTION_DB_PATH = os.getenv("SQLITE_DB_PATH")
+    if PRODUCTION_DB_PATH:
+        DB_DIR = Path(PRODUCTION_DB_PATH).parent
+        DB_PATH = Path(PRODUCTION_DB_PATH)
+    else:
+        DB_DIR = Path(__file__).parent.parent / "data"
+        DB_PATH = DB_DIR / "app.db"
+    
+    DB_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # SQLite event listener to enable WAL mode and performance PRAGMAs
+    from sqlalchemy import event
+    
+    def configure_sqlite(dbapi_connection, connection_record):
+        """Configure SQLite for production performance"""
+        cursor = dbapi_connection.cursor()
+        # Enable WAL mode for better concurrent reads
+        cursor.execute("PRAGMA journal_mode=WAL")
+        # Synchronous NORMAL is safe with WAL and faster than FULL
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        # Store temp tables in memory for speed
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        # Increase cache size (negative = KB, positive = pages)
+        cursor.execute("PRAGMA cache_size=-64000")  # 64MB cache
+        # Enable foreign keys
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+    
+    engine = create_engine(
+        f"sqlite:///{DB_PATH}",
+        connect_args={"check_same_thread": False},  # Needed for SQLite with threads
+        echo=False
+    )
+    
+    # Register the connection event
+    event.listen(engine, "connect", configure_sqlite)
+    
+    DB_TYPE = "sqlite"
+    logger.info(f"SQLite database path: {DB_PATH}")
+
 
 # Session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
+# Platform Model - Institution, Department, User
+class Institution(Base):
+    __tablename__ = "institutions"
+    
+    id = Column(String, primary_key=True)  # institution_id
+    name = Column(String, nullable=False, index=True)
+    code = Column(String, nullable=True, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_active = Column(Integer, default=1)  # 0 or 1
+
+
+class Department(Base):
+    __tablename__ = "departments"
+    
+    id = Column(String, primary_key=True)  # department_id
+    institution_id = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False, index=True)
+    code = Column(String, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    is_active = Column(Integer, default=1)  # 0 or 1
+
+
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(String, primary_key=True)  # user_id (Firebase UID)
+    email = Column(String, nullable=False, unique=True, index=True)
+    name = Column(String, nullable=True)
+    role = Column(String, default="department")  # institution, department (NO admin)
+    institution_id = Column(String, nullable=True, index=True)  # For college/department users
+    department_id = Column(String, nullable=True, index=True)  # For department users only
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_login = Column(DateTime, nullable=True)
+
+
 # Minimal SQLite Schema
 class Batch(Base):
     __tablename__ = "batches"
     
     id = Column(String, primary_key=True)  # batch_id
-    mode = Column(String)  # "ugc" or "aicte"
+    mode = Column(String)  # "aicte", "nba", "naac", "nirf"
     new_university = Column(Integer, default=0)  # 0 = renewal, 1 = new university (for UGC only)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     status = Column(String, default="created")
     errors = Column(JSON, nullable=True)  # Processing errors
+    
+    # User ownership (PLATFORM MODEL)
+    user_id = Column(String, nullable=True, index=True)  # Firebase UID
+    institution_id = Column(String, nullable=True, index=True)  # Reference to Institution
+    department_id = Column(String, nullable=True, index=True)  # Reference to Department
+    
+    # Department-wise hierarchy (Institution > Department > Year) - Legacy fields for compatibility
+    institution_name = Column(String, nullable=True, index=True)
+    department_name = Column(String, nullable=True, index=True)
+    academic_year = Column(String, nullable=True, index=True)  # e.g., "2024-25"
+    
+    # Data validation flags
+    is_invalid = Column(Integer, default=0)  # 0 = valid, 1 = invalid (no dummy data stored)
+    authenticity_score = Column(Float, nullable=True)  # From authenticity service
     
     # Results stored as JSON (temporary)
     sufficiency_result = Column(JSON, nullable=True)
@@ -78,6 +177,7 @@ class File(Base):
     filename = Column(String)
     filepath = Column(String)
     file_size = Column(Integer)
+    document_hash = Column(String, index=True)  # SHA256 hash for duplicate detection
     uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 class ComplianceFlag(Base):
@@ -166,12 +266,23 @@ Index("idx_blocks_batch_type", Block.batch_id, Block.block_type)
 Index("idx_compliance_flags_batch", ComplianceFlag.batch_id)
 Index("idx_approval_required_docs_batch", ApprovalRequiredDocument.batch_id)
 Index("idx_batch_status", Batch.status)
+Index("idx_batch_institution_dept_year", Batch.institution_name, Batch.department_name, Batch.academic_year)
+Index("idx_batch_invalid_status", Batch.is_invalid, Batch.status)
+Index("idx_batch_user", Batch.user_id)
+Index("idx_batch_institution", Batch.institution_id)
+Index("idx_batch_department", Batch.department_id)
+Index("idx_user_institution", User.institution_id)
+Index("idx_user_department", User.department_id)
+Index("idx_department_institution", Department.institution_id)
 
 # Create tables
 def init_db():
     """Initialize database tables"""
     Base.metadata.create_all(bind=engine)
-    logger.info(f"SQLite database initialized at {DB_PATH}")
+    if DB_TYPE == "postgresql":
+        logger.info("PostgreSQL database initialized (Supabase)")
+    else:
+        logger.info(f"SQLite database initialized at {DB_PATH}")
 
 def get_db() -> Session:
     """Get database session"""
@@ -185,5 +296,8 @@ def close_db(db: Session):
     """Close database session"""
     db.close()
 
-# Initialize on import
-init_db()
+# Import all models to ensure they're registered
+from models.gov_document import GovDocument
+
+# Note: init_db() is called from main.py after .env file is loaded
+# Do not call init_db() at module level to avoid connecting before .env is loaded

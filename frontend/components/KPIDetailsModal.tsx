@@ -27,7 +27,57 @@ export default function KPIDetailsModal({ isOpen, onClose, batchId, kpiName }: K
         setError(null);
         try {
             const response = await kpiDetailsApi.get(batchId, kpiName);
-            setData(response);
+
+            // The API returns nested data like {batch_id, fsr: {...}, infrastructure: {...}}
+            // We need to extract the specific KPI data based on kpiName
+            // Map kpiName to the response key
+            const kpiKeyMap: Record<string, string> = {
+                'fsr': 'fsr',
+                'infrastructure': 'infrastructure',
+                'placement': 'placement',
+                'lab': 'lab_compliance',
+                'overall': 'overall'
+            };
+
+            const responseKey = kpiKeyMap[kpiName] || kpiName;
+            const kpiData = (response as any)[responseKey];
+
+            if (kpiData) {
+                // Transform the nested KPI data to match our expected format
+                setData({
+                    kpi_type: kpiData.kpi_key || kpiName,
+                    kpi_name: kpiData.kpi_name || kpiName.replace(/_/g, ' ').toUpperCase(),
+                    score: kpiData.final_score ?? null,
+                    weightages: {},
+                    parameters: (kpiData.parameters || []).map((p: any) => ({
+                        name: p.parameter_name || '',
+                        display_name: p.display_name || p.parameter_name || '',
+                        extracted: p.raw_value ?? p.normalized_value ?? null,
+                        norm: p.normalized_value ?? p.raw_value ?? null,
+                        weight: p.weight ?? 0,
+                        contrib: p.contribution ?? p.score ?? 0,
+                        unit: p.unit || '',
+                        missing: p.missing ?? false,
+                        evidence: {
+                            snippet: p.note || '',
+                            page: 0,
+                            source_doc: ''
+                        }
+                    })),
+                    calculation_steps: (kpiData.formula_steps || []).map((s: any, i: number) => ({
+                        step: s.step_number ?? i + 1,
+                        description: s.description || '',
+                        formula: s.formula || '',
+                        result: s.result ?? null
+                    })),
+                    formula: kpiData.formula_text || '',
+                    evidence: {},
+                    included_kpis: [],
+                    excluded_kpis: kpiData.missing_parameters || []
+                });
+            } else {
+                setError('KPI data not found');
+            }
         } catch (err) {
             setError('Failed to load KPI details');
             console.error('Error fetching KPI details:', err);
@@ -69,16 +119,16 @@ export default function KPIDetailsModal({ isOpen, onClose, batchId, kpiName }: K
                             <div className="flex items-center gap-6">
                                 <div className="w-24 h-24 rounded-full border-8 border-primary flex items-center justify-center">
                                     <span className="text-3xl font-bold text-primary">
-                                        {data.score !== null ? data.score.toFixed(0) : '—'}
+                                        {data.score != null ? data.score.toFixed(0) : '—'}
                                     </span>
                                 </div>
                                 <div className="flex-1">
                                     <p className="text-gray-600">
-                                        {data.score !== null 
-                                            ? `${data.kpi_name} is ${data.score.toFixed(2)}/100`
+                                        {data.score != null
+                                            ? `${data.kpi_name || 'KPI'} is ${data.score.toFixed(2)}/100`
                                             : 'Insufficient data to calculate score'}
                                     </p>
-                                    {data.included_kpis && (
+                                    {data.included_kpis && data.included_kpis.length > 0 && (
                                         <div className="flex gap-2 mt-2">
                                             <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium">
                                                 Included: {data.included_kpis.join(', ')}
@@ -96,92 +146,98 @@ export default function KPIDetailsModal({ isOpen, onClose, batchId, kpiName }: K
                             </div>
 
                             {/* Formula */}
-                            <div className="bg-gray-50 rounded-2xl p-4">
-                                <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                                    <Calculator className="w-5 h-5 text-primary" />
-                                    Formula
-                                </h3>
-                                <code className="block bg-gray-100 p-3 rounded-xl font-mono text-sm text-gray-700">
-                                    {data.formula}
-                                </code>
-                            </div>
+                            {data.formula && (
+                                <div className="bg-gray-50 rounded-2xl p-4">
+                                    <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                                        <Calculator className="w-5 h-5 text-primary" />
+                                        Formula
+                                    </h3>
+                                    <code className="block bg-gray-100 p-3 rounded-xl font-mono text-sm text-gray-700">
+                                        {data.formula}
+                                    </code>
+                                </div>
+                            )}
 
                             {/* Parameter Table */}
-                            <div>
-                                <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                                    <FileText className="w-5 h-5 text-primary" />
-                                    Parameter Contributions
-                                </h3>
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-sm">
-                                        <thead>
-                                            <tr className="border-b-2 border-gray-100">
-                                                <th className="text-left py-3 px-3 font-semibold text-gray-700">Parameter</th>
-                                                <th className="text-right py-3 px-3 font-semibold text-gray-700">Extracted</th>
-                                                <th className="text-right py-3 px-3 font-semibold text-gray-700">Norm</th>
-                                                <th className="text-right py-3 px-3 font-semibold text-gray-700">Weight</th>
-                                                <th className="text-right py-3 px-3 font-semibold text-gray-700">Contrib</th>
-                                                <th className="text-left py-3 px-3 font-semibold text-gray-700">Evidence</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {data.parameters.map((param, idx) => (
-                                                <tr key={idx} className={`border-b border-gray-50 ${param.missing ? 'bg-red-50' : ''}`}>
-                                                    <td className="py-3 px-3 font-medium text-gray-800">{param.display_name}</td>
-                                                    <td className="py-3 px-3 text-right text-gray-600">
-                                                        {param.extracted !== null && param.extracted !== undefined 
-                                                            ? `${param.extracted}${param.unit ? ` ${param.unit}` : ''}` 
-                                                            : <span className="text-gray-400">—</span>}
-                                                    </td>
-                                                    <td className="py-3 px-3 text-right text-gray-500">{String(param.norm)}{param.unit ? ` ${param.unit}` : ''}</td>
-                                                    <td className="py-3 px-3 text-right text-gray-600">{(param.weight * 100).toFixed(0)}%</td>
-                                                    <td className="py-3 px-3 text-right font-semibold text-primary">
-                                                        {param.contrib !== null && param.contrib !== undefined ? param.contrib.toFixed(2) : '—'}
-                                                    </td>
-                                                    <td className="py-3 px-3 text-gray-500 text-xs max-w-[200px] truncate">
-                                                        {param.evidence?.snippet ? (
-                                                            <span title={param.evidence.snippet}>
-                                                                📄 p.{param.evidence.page || '?'}: {param.evidence.snippet.slice(0, 50)}...
-                                                            </span>
-                                                        ) : '—'}
-                                                    </td>
+                            {data.parameters && data.parameters.length > 0 && (
+                                <div>
+                                    <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                                        <FileText className="w-5 h-5 text-primary" />
+                                        Parameter Contributions
+                                    </h3>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <thead>
+                                                <tr className="border-b-2 border-gray-100">
+                                                    <th className="text-left py-3 px-3 font-semibold text-gray-700">Parameter</th>
+                                                    <th className="text-right py-3 px-3 font-semibold text-gray-700">Extracted</th>
+                                                    <th className="text-right py-3 px-3 font-semibold text-gray-700">Norm</th>
+                                                    <th className="text-right py-3 px-3 font-semibold text-gray-700">Weight</th>
+                                                    <th className="text-right py-3 px-3 font-semibold text-gray-700">Contrib</th>
+                                                    <th className="text-left py-3 px-3 font-semibold text-gray-700">Evidence</th>
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                            </thead>
+                                            <tbody>
+                                                {data.parameters.map((param, idx) => (
+                                                    <tr key={idx} className={`border-b border-gray-50 ${param?.missing ? 'bg-red-50' : ''}`}>
+                                                        <td className="py-3 px-3 font-medium text-gray-800">{param?.display_name || '—'}</td>
+                                                        <td className="py-3 px-3 text-right text-gray-600">
+                                                            {param?.extracted != null
+                                                                ? `${param.extracted}${param?.unit ? ` ${param.unit}` : ''}`
+                                                                : <span className="text-gray-400">—</span>}
+                                                        </td>
+                                                        <td className="py-3 px-3 text-right text-gray-500">{param?.norm != null ? String(param.norm) : '—'}{param?.unit ? ` ${param.unit}` : ''}</td>
+                                                        <td className="py-3 px-3 text-right text-gray-600">{param?.weight != null ? `${(param.weight * 100).toFixed(0)}%` : '—'}</td>
+                                                        <td className="py-3 px-3 text-right font-semibold text-primary">
+                                                            {param?.contrib != null ? param.contrib.toFixed(2) : '—'}
+                                                        </td>
+                                                        <td className="py-3 px-3 text-gray-500 text-xs max-w-[200px] truncate">
+                                                            {param?.evidence?.snippet ? (
+                                                                <span title={param.evidence.snippet}>
+                                                                    📄 p.{param.evidence?.page || '?'}: {param.evidence.snippet.slice(0, 50)}...
+                                                                </span>
+                                                            ) : '—'}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
-                            </div>
+                            )}
 
                             {/* Calculation Steps */}
-                            <div>
-                                <h3 className="font-semibold text-gray-800 mb-3">Step-by-Step Calculation</h3>
-                                <div className="space-y-2">
-                                    {data.calculation_steps.map((step) => (
-                                        <div key={step.step} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
-                                            <div className="w-7 h-7 bg-primary text-white rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">
-                                                {step.step}
+                            {data.calculation_steps && data.calculation_steps.length > 0 && (
+                                <div>
+                                    <h3 className="font-semibold text-gray-800 mb-3">Step-by-Step Calculation</h3>
+                                    <div className="space-y-2">
+                                        {data.calculation_steps.map((step, idx) => (
+                                            <div key={step?.step || idx} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
+                                                <div className="w-7 h-7 bg-primary text-white rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">
+                                                    {step?.step || idx + 1}
+                                                </div>
+                                                <div className="flex-1">
+                                                    <p className="text-sm font-medium text-gray-800">{step?.description || ''}</p>
+                                                    <code className="text-xs text-gray-500 font-mono">{step?.formula || ''}</code>
+                                                    {step?.result != null && (
+                                                        <span className="ml-2 text-sm text-primary font-semibold">= {step.result}</span>
+                                                    )}
+                                                </div>
                                             </div>
-                                            <div className="flex-1">
-                                                <p className="text-sm font-medium text-gray-800">{step.description}</p>
-                                                <code className="text-xs text-gray-500 font-mono">{step.formula}</code>
-                                                {step.result !== null && step.result !== undefined && (
-                                                    <span className="ml-2 text-sm text-primary font-semibold">= {step.result}</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
+                                        ))}
+                                    </div>
                                 </div>
-                            </div>
+                            )}
 
                             {/* Missing Parameters Warning */}
-                            {data.parameters.some(p => p.missing) && (
+                            {data.parameters && data.parameters.some(p => p?.missing) && (
                                 <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
                                     <h3 className="font-semibold text-amber-800 flex items-center gap-2">
                                         <AlertTriangle className="w-5 h-5" />
                                         Missing Parameters
                                     </h3>
                                     <p className="text-sm text-amber-700 mt-2">
-                                        {data.parameters.filter(p => p.missing).map(p => p.display_name).join(', ')}
+                                        {data.parameters.filter(p => p?.missing).map(p => p?.display_name || 'Unknown').join(', ')}
                                     </p>
                                 </div>
                             )}

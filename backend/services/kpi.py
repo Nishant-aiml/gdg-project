@@ -20,12 +20,17 @@ class KPIService:
     ) -> Dict[str, Any]:
         """
         Calculate all KPIs for the mode from information blocks
+        Uses official formulas with evidence tracking
+        
         Returns normalized scores (0-100) or None if required fields missing
         
         Can work with either:
         - blocks: List of information blocks (new way)
         - aggregated_data: Pre-aggregated data from blocks (preferred)
         """
+        from services.evidence_tracker import EvidenceTracker
+        from services.kpi_official import OfficialKPIService
+        
         formulas = get_kpi_formulas(mode)
         kpi_results = {}
         
@@ -37,65 +42,181 @@ class KPIService:
         else:
             extracted_data = {}
         
-        # Calculate each KPI
+        # Build evidence map from blocks
+        evidence_map = {}
+        if blocks:
+            # Evidence tracker now supports dicts directly
+            evidence_map = EvidenceTracker.build_evidence_map(blocks)
+        
+        # Use official KPI service for AICTE, NBA, NAAC, NIRF
+        official_service = OfficialKPIService()
+        
+        # Calculate each KPI using official formulas
         for kpi_id, kpi_config in formulas.items():
-            formula_func = getattr(self, kpi_config["formula"], None)
-            if formula_func:
-                score = formula_func(extracted_data, mode)
-                kpi_results[kpi_id] = {
-                    "name": kpi_config["name"],
-                    "value": score if score is None else round(score, 2),
-                    "weight": kpi_config["weight"]
-                }
+            if mode.lower() == "aicte":
+                # AICTE mode - use official formulas
+                if kpi_id == "fsr_score":
+                    score, info = official_service.calculate_aicte_fsr(extracted_data, evidence_map)
+                elif kpi_id == "infrastructure_score":
+                    score, info = official_service.calculate_aicte_infrastructure(extracted_data, evidence_map)
+                elif kpi_id == "placement_index":
+                    score, info = official_service.calculate_aicte_placement(extracted_data, evidence_map)
+                elif kpi_id == "lab_compliance_index":
+                    score, info = official_service.calculate_aicte_lab_compliance(extracted_data, evidence_map)
+                else:
+                    # Fallback to legacy method
+                    formula_func = getattr(self, kpi_config["formula"], None)
+                    score = formula_func(extracted_data, mode) if formula_func else None
+                    info = {}
+            elif mode.lower() == "nba":
+                # NBA mode - use official formulas
+                if kpi_id == "peos_psos":
+                    score, info = official_service.calculate_nba_peos_psos(extracted_data, evidence_map)
+                elif kpi_id == "faculty_quality":
+                    score, info = official_service.calculate_nba_faculty_quality(extracted_data, evidence_map)
+                elif kpi_id == "student_performance":
+                    score, info = official_service.calculate_nba_student_performance(extracted_data, evidence_map)
+                elif kpi_id == "continuous_improvement":
+                    score, info = official_service.calculate_nba_continuous_improvement(extracted_data, evidence_map)
+                elif kpi_id == "co_po_mapping":
+                    score, info = official_service.calculate_nba_co_po_mapping(extracted_data, evidence_map)
+                else:
+                    score = None
+                    info = {}
+            elif mode.lower() == "naac":
+                # NAAC mode - use official formulas
+                criterion_id = kpi_id  # e.g., "criterion_1"
+                score, info = official_service.calculate_naac_criterion(criterion_id, extracted_data, evidence_map)
+            elif mode.lower() == "nirf":
+                # NIRF mode - use official formulas
+                parameter_name = kpi_id  # e.g., "tlr"
+                score, info = official_service.calculate_nirf_parameter(parameter_name, extracted_data, evidence_map)
+            else:
+                # UGC or other modes - use legacy methods
+                formula_func = getattr(self, kpi_config["formula"], None)
+                score = formula_func(extracted_data, mode) if formula_func else None
+                info = {}
+            
+            kpi_results[kpi_id] = {
+                "name": kpi_config["name"],
+                "value": score if score is None else round(score, 2),
+                "weight": kpi_config["weight"],
+                "evidence_info": info.get("evidence", {}) if isinstance(info, dict) else {}
+            }
         
         # Calculate overall score based on mode-specific formulas
         if mode.lower() == "aicte":
-            # AICTE Overall (aligned with expected baselines):
-            # - If FSR is available: average FSR + Placement + Lab (ignore infra to avoid
-            #   overweighting area norm when other KPIs are strong)
-            # - If FSR is missing: average Infrastructure + Placement + Lab
+            # AICTE Overall - OFFICIAL FORMULA
             fsr = kpi_results.get("fsr_score", {}).get("value")
             infra = kpi_results.get("infrastructure_score", {}).get("value")
             placement = kpi_results.get("placement_index", {}).get("value")
             lab = kpi_results.get("lab_compliance_index", {}).get("value")
 
-            if fsr is not None:
-                kpi_values = [v for v in [fsr, placement, lab] if v is not None]
-            else:
-                kpi_values = [v for v in [infra, placement, lab] if v is not None]
-
-            if kpi_values:
-                overall_score = sum(kpi_values) / len(kpi_values)
-                kpi_results["overall_score"] = {
-                    "name": "AICTE Overall Score",
-                    "value": round(overall_score, 2),
-                    "weight": 1.0
-                }
-            else:
-                kpi_results["overall_score"] = {
-                    "name": "AICTE Overall Score",
-                    "value": None,
-                    "weight": 1.0
-                }
-        elif mode.lower() == "ugc":
-            # UGC Overall = (Research*0.3 + Governance*0.3 + StudentOutcome*0.4)
-            research = kpi_results.get("research_index", {}).get("value")
-            governance = kpi_results.get("governance_score", {}).get("value")
-            student_outcome = kpi_results.get("student_outcome_index", {}).get("value")
+            kpi_scores = {
+                "fsr_score": fsr,
+                "infrastructure_score": infra,
+                "placement_index": placement,
+                "lab_compliance_index": lab
+            }
             
-            if research is not None and governance is not None and student_outcome is not None:
-                overall_score = (research * 0.3 + governance * 0.3 + student_outcome * 0.4)
-                kpi_results["overall_score"] = {
-                    "name": "UGC Overall Score",
-                    "value": round(overall_score, 2),
-                    "weight": 1.0
-                }
-            else:
-                kpi_results["overall_score"] = {
-                    "name": "UGC Overall Score",
-                    "value": None,
-                    "weight": 1.0
-                }
+            overall_score, overall_info = official_service.calculate_aicte_overall(kpi_scores)
+            kpi_results["overall_score"] = {
+                "name": "AICTE Overall Score",
+                "value": overall_score,
+                "weight": 1.0,
+                "evidence_info": overall_info
+            }
+        elif mode.lower() == "nba":
+            # NBA Overall - OFFICIAL FORMULA
+            peos_psos = kpi_results.get("peos_psos", {}).get("value")
+            faculty_quality = kpi_results.get("faculty_quality", {}).get("value")
+            student_performance = kpi_results.get("student_performance", {}).get("value")
+            continuous_improvement = kpi_results.get("continuous_improvement", {}).get("value")
+            co_po_mapping = kpi_results.get("co_po_mapping", {}).get("value")
+            
+            criterion_scores = {
+                "peos_psos": peos_psos,
+                "faculty_quality": faculty_quality,
+                "student_performance": student_performance,
+                "continuous_improvement": continuous_improvement,
+                "co_po_mapping": co_po_mapping
+            }
+            
+            overall_score, overall_info = official_service.calculate_nba_overall(criterion_scores)
+            kpi_results["overall_score"] = {
+                "name": "NBA Overall Score",
+                "value": overall_score,
+                "weight": 1.0,
+                "evidence_info": overall_info
+            }
+        elif mode.lower() == "naac":
+            # NAAC Overall - OFFICIAL FORMULA
+            criterion_1 = kpi_results.get("criterion_1", {}).get("value")
+            criterion_2 = kpi_results.get("criterion_2", {}).get("value")
+            criterion_3 = kpi_results.get("criterion_3", {}).get("value")
+            criterion_4 = kpi_results.get("criterion_4", {}).get("value")
+            criterion_5 = kpi_results.get("criterion_5", {}).get("value")
+            criterion_6 = kpi_results.get("criterion_6", {}).get("value")
+            criterion_7 = kpi_results.get("criterion_7", {}).get("value")
+            
+            criterion_scores = {
+                "criterion_1": criterion_1,
+                "criterion_2": criterion_2,
+                "criterion_3": criterion_3,
+                "criterion_4": criterion_4,
+                "criterion_5": criterion_5,
+                "criterion_6": criterion_6,
+                "criterion_7": criterion_7
+            }
+            
+            criterion_weights = {
+                "criterion_1": 0.15,
+                "criterion_2": 0.15,
+                "criterion_3": 0.15,
+                "criterion_4": 0.15,
+                "criterion_5": 0.15,
+                "criterion_6": 0.15,
+                "criterion_7": 0.10
+            }
+            
+            overall_score, overall_info = official_service.calculate_naac_overall(criterion_scores, criterion_weights)
+            kpi_results["overall_score"] = {
+                "name": "NAAC Overall Score",
+                "value": overall_score,
+                "weight": 1.0,
+                "evidence_info": overall_info
+            }
+        elif mode.lower() == "nirf":
+            # NIRF Overall - OFFICIAL FORMULA
+            tlr = kpi_results.get("tlr", {}).get("value")
+            rp = kpi_results.get("rp", {}).get("value")
+            go = kpi_results.get("go", {}).get("value")
+            oi = kpi_results.get("oi", {}).get("value")
+            pr = kpi_results.get("pr", {}).get("value")
+            
+            parameter_scores = {
+                "tlr": tlr,
+                "rp": rp,
+                "go": go,
+                "oi": oi,
+                "pr": pr
+            }
+            
+            parameter_weights = {
+                "tlr": 0.30,
+                "rp": 0.30,
+                "go": 0.20,
+                "oi": 0.10,
+                "pr": 0.10
+            }
+            
+            overall_score, overall_info = official_service.calculate_nirf_overall(parameter_scores, parameter_weights)
+            kpi_results["overall_score"] = {
+                "name": "NIRF Overall Score",
+                "value": overall_score,
+                "weight": 1.0,
+                "evidence_info": overall_info
+            }
         else:
             # Fallback: calculate from available KPIs
             kpi_values = [kpi["value"] for kpi in kpi_results.values() if kpi["value"] is not None]
@@ -157,8 +278,8 @@ class KPIService:
                         continue  # Already handled above
                     
                     if value is None or value == "" or value == "null" or value == "None":
-                            continue
-                            
+                        continue
+                    
                     # Map common alternate field names
                     target_key = key
                     if key == "total_faculty":
@@ -296,13 +417,17 @@ class KPIService:
     # AICTE KPI Formulas
     def calculate_fsr_score(self, data: Dict[str, Any], mode: str) -> Optional[float]:
         """
-        Calculate FSR (Faculty Student Ratio) Score (0-100) or None if required fields missing
-        Formula:
-        - If FSR >= 1/20 (0.05) → 100
-        - If 1/20 > FSR >= 1/25 (0.04) → 60
-        - Else → 0
+        Calculate FSR (Faculty Student Ratio) Score - OFFICIAL FORMULA
+        
+        Formula: FSR = Total Students / Total Faculty (NOT Faculty/Students)
+        
+        Scoring Rule:
+        - FSR ≤ 15 → Score = 100
+        - 15 < FSR ≤ 20 → Score = linear scale (100 → 60)
+        - FSR > 20 → Score = proportional penalty
         
         STRICT: Only uses parsed numeric values (_num fields or parse_numeric results)
+        Returns None if required fields missing (not 0)
         """
         # STRICT: Prefer _num fields (already parsed and validated)
         faculty_count = (
@@ -343,15 +468,25 @@ class KPIService:
         if student_count == 0 or faculty_count == 0:
             return None
         
-        fsr = faculty_count / student_count
+        # OFFICIAL FORMULA: FSR = Students / Faculty (NOT Faculty/Students)
+        fsr = student_count / faculty_count
         
-        # Exact formula: FSR >= 1/20 (0.05) → 100, 1/20 > FSR >= 1/25 (0.04) → 60, Else → 0
-        if fsr >= 0.05:  # 1/20
+        # Official scoring rule
+        if fsr <= 15:
             return 100.0
-        elif fsr >= 0.04:  # 1/25
-            return 60.0
+        elif fsr <= 20:
+            # Linear scale: 100 at FSR=15, 60 at FSR=20
+            # slope = (60 - 100) / (20 - 15) = -8
+            # score = 100 + (fsr - 15) * (-8)
+            score = 100 + (fsr - 15) * (-8)
+            return round(score, 2)
         else:
-            return 0.0
+            # Proportional penalty: FSR > 20
+            # Penalty = (fsr - 20) * 3 per unit over 20
+            # Score = 60 - min(60, (fsr - 20) * 3)
+            penalty = (fsr - 20) * 3
+            score = max(0.0, 60.0 - penalty)
+            return round(score, 2)
     
     def calculate_infrastructure_score(self, data: Dict[str, Any], mode: str) -> Optional[float]:
         """

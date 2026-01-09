@@ -4,7 +4,7 @@ Only includes completed batches with valid documents and KPIs.
 """
 
 import json
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Dict, Any, Optional, Tuple
 from schemas.compare import (
     ComparisonResponse,
@@ -23,6 +23,8 @@ from utils.label_formatter import (
     extract_academic_year_from_data,
 )
 from config.database import get_db, close_db, Batch, Block
+from middleware.auth_middleware import get_current_user
+from services.production_guard import ProductionGuard
 
 router = APIRouter()
 
@@ -33,6 +35,7 @@ VALID_STATUSES = ["completed"]
 def _validate_batch(batch_id: str) -> Tuple[bool, Optional[str], Optional[Dict]]:
     """
     Validate if a batch is eligible for comparison.
+    STRICT: Exclude invalid batches, batches with 0 docs, incomplete processing.
     
     Returns: (is_valid, skip_reason, batch_info)
     """
@@ -42,6 +45,11 @@ def _validate_batch(batch_id: str) -> Tuple[bool, Optional[str], Optional[Dict]]
         
         if not batch:
             return False, "batch_not_found", None
+        
+        # CRITICAL: Use ProductionGuard to validate batch
+        is_valid, error_msg = ProductionGuard.validate_batch_for_operations(batch)
+        if not is_valid:
+            return False, "batch_invalid", {"mode": batch.mode, "reason": error_msg or "Marked as invalid - insufficient data"}
         
         # Check status - must be completed
         if batch.status not in VALID_STATUSES:
@@ -55,12 +63,19 @@ def _validate_batch(batch_id: str) -> Tuple[bool, Optional[str], Optional[Dict]]
         
         # Check blocks - must have at least some extracted data
         blocks = db.query(Block).filter(Block.batch_id == batch_id).all()
-        if len(blocks) == 0:
-            return False, "no_extracted_blocks", {"mode": batch.mode}
+        valid_blocks = [b for b in blocks if not (hasattr(b, 'is_invalid') and b.is_invalid == 1)]
+        if len(valid_blocks) == 0:
+            return False, "no_valid_blocks", {"mode": batch.mode}
+        
+        # Check KPIs - must have at least one valid KPI > 0
+        kpi_results = batch.kpi_results or {}
+        overall_score = kpi_results.get("overall_score", {}).get("value")
+        if overall_score is None or overall_score == 0:
+            return False, "no_valid_kpis", {"mode": batch.mode, "overall_score": overall_score}
         
         return True, None, {
             "mode": batch.mode,
-            "blocks": blocks,
+            "blocks": valid_blocks,
         }
     finally:
         close_db(db)
@@ -315,11 +330,124 @@ def rank_top_institutions(
 
 
 @router.get("/compare", response_model=ComparisonResponse)
-def compare_institutions(batch_ids: str = Query(..., description="Comma-separated batch ids")):
+def compare_institutions(
+    batch_ids: str = Query(..., description="Comma-separated batch ids"),
+    user: Optional[dict] = Depends(get_current_user)
+):
     """
     Compare 2-10 institutions with strict validation.
     Only completed batches with valid documents and KPIs are included.
+    PERFORMANCE: Cached for 5 minutes
     """
+    # PERFORMANCE: Check cache first
+    from utils.performance_cache import cache, get_cache_key
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Create cache key from sorted batch IDs (order-independent)
+    ids = [bid.strip() for bid in batch_ids.split(",") if bid.strip()]
+    
+    # DEMO MODE: Return demo comparison for demo batches
+    has_demo = any(bid.startswith("demo-") for bid in ids)
+    
+    # Try cache first for non-demo batches
+    if not has_demo:
+        try:
+            cache_key = get_cache_key("compare", *sorted(ids))
+            cached = cache.get(cache_key)
+            if cached:
+                logger.debug(f"Cache hit for comparison {batch_ids}")
+                return cached
+        except Exception as e:
+            logger.warning(f"Cache check failed: {e}")
+    
+    # For demo batches, return mock comparison data
+    if has_demo:
+            demo_institutions = [
+                InstitutionComparison(
+                    batch_id="demo-batch-aicte-2024",
+                    institution_name="Indian Institute of Technology Delhi",
+                    short_label="IIT-D 24-25",
+                    academic_year="2024-25",
+                    mode="aicte",
+                    kpis={
+                        "fsr_score": 85.2,
+                        "infrastructure_score": 78.5,
+                        "placement_index": 92.3,
+                        "lab_compliance_index": 82.1,
+                        "overall_score": 84.5
+                    },
+                    sufficiency_percent=95.0,
+                    compliance_count=0,
+                    overall_score=84.5,
+                    strengths=["Excellent Placement (92.3)", "Strong Faculty-Student Ratio (85.2)"],
+                    weaknesses=[]
+                ),
+                InstitutionComparison(
+                    batch_id="demo-batch-aicte-2023",
+                    institution_name="National Institute of Technology Trichy",
+                    short_label="NIT-T 24-25",
+                    academic_year="2024-25",
+                    mode="aicte",
+                    kpis={
+                        "fsr_score": 78.9,
+                        "infrastructure_score": 82.0,
+                        "placement_index": 88.5,
+                        "lab_compliance_index": 75.3,
+                        "overall_score": 81.2
+                    },
+                    sufficiency_percent=90.0,
+                    compliance_count=1,
+                    overall_score=81.2,
+                    strengths=["Good Infrastructure (82.0)", "Strong Placement (88.5)"],
+                    weaknesses=["Lab Compliance needs improvement (75.3)"]
+                )
+            ]
+            
+            demo_matrix = {
+                "fsr_score": {"IIT-D 24-25": 85.2, "NIT-T 24-25": 78.9},
+                "infrastructure_score": {"IIT-D 24-25": 78.5, "NIT-T 24-25": 82.0},
+                "placement_index": {"IIT-D 24-25": 92.3, "NIT-T 24-25": 88.5},
+                "lab_compliance_index": {"IIT-D 24-25": 82.1, "NIT-T 24-25": 75.3},
+                "overall_score": {"IIT-D 24-25": 84.5, "NIT-T 24-25": 81.2}
+            }
+            
+            return ComparisonResponse(
+                institutions=demo_institutions,
+                skipped_batches=[],
+                comparison_matrix=demo_matrix,
+                winner_institution="demo-batch-aicte-2024",
+                winner_label="IIT-D 24-25",
+                winner_name="Indian Institute of Technology Delhi",
+                category_winners={
+                    "fsr_score": "demo-batch-aicte-2024",
+                    "placement_index": "demo-batch-aicte-2024",
+                    "infrastructure_score": "demo-batch-aicte-2023",
+                    "lab_compliance_index": "demo-batch-aicte-2024",
+                    "overall_score": "demo-batch-aicte-2024"
+                },
+                category_winners_labels={
+                    "fsr_score": "IIT-D 24-25",
+                    "placement_index": "IIT-D 24-25",
+                    "infrastructure_score": "NIT-T 24-25",
+                    "lab_compliance_index": "IIT-D 24-25",
+                    "overall_score": "IIT-D 24-25"
+                },
+                interpretation=ComparisonInterpretation(
+                    best_overall_batch_id="demo-batch-aicte-2024",
+                    best_overall_label="IIT-D 24-25",
+                    best_overall_name="Indian Institute of Technology Delhi",
+                    category_winners=[
+                        CategoryWinner(kpi_key="overall_score", kpi_name="Overall Score", winner_batch_id="demo-batch-aicte-2024", winner_label="IIT-D 24-25", winner_value=84.5, is_tie=False, tied_with=[]),
+                        CategoryWinner(kpi_key="placement_index", kpi_name="Placement Index", winner_batch_id="demo-batch-aicte-2024", winner_label="IIT-D 24-25", winner_value=92.3, is_tie=False, tied_with=[]),
+                        CategoryWinner(kpi_key="infrastructure_score", kpi_name="Infrastructure Score", winner_batch_id="demo-batch-aicte-2023", winner_label="NIT-T 24-25", winner_value=82.0, is_tie=False, tied_with=[])
+                    ],
+                    notes=["IIT-D leads with overall score of 84.5", "IIT-D has zero compliance issues"]
+                ),
+                valid_for_comparison=True,
+                validation_message=None
+            )
+    
     ids = [bid.strip() for bid in batch_ids.split(",") if bid.strip()]
     
     if len(ids) < 2:
@@ -331,6 +459,9 @@ def compare_institutions(batch_ids: str = Query(..., description="Comma-separate
     skipped_batches: List[SkippedBatch] = []
     comparison_matrix: Dict[str, Dict[str, Optional[float]]] = {}
     
+    # DEPARTMENT GOVERNANCE: Collect department info to prevent cross-department comparison
+    departments_seen: Dict[str, str] = {}  # batch_id -> department_name
+    
     for bid in ids:
         # Step 1: Validate batch eligibility
         is_valid, skip_reason, batch_info = _validate_batch(bid)
@@ -339,7 +470,16 @@ def compare_institutions(batch_ids: str = Query(..., description="Comma-separate
             skipped_batches.append(SkippedBatch(batch_id=bid, reason=skip_reason or "unknown"))
             continue
         
-        # Step 2: Get dashboard data
+        # Step 2: Get batch info for department validation
+        db = get_db()
+        try:
+            batch = db.query(Batch).filter(Batch.id == bid).first()
+            if batch and batch.department_name:
+                departments_seen[bid] = batch.department_name
+        finally:
+            close_db(db)
+        
+        # Step 3: Get dashboard data
         try:
             dashboard = get_dashboard_data(bid)
         except HTTPException:
@@ -359,7 +499,7 @@ def compare_institutions(batch_ids: str = Query(..., description="Comma-separate
             elif key == "lab_compliance_index":
                 val = dashboard.kpis.get("lab_compliance_index") or dashboard.kpis.get("lab_compliance")
             elif key == "overall_score":
-                val = dashboard.kpis.get("overall_score") or dashboard.kpis.get("aicte_overall_score") or dashboard.kpis.get("ugc_overall_score")
+                val = dashboard.kpis.get("overall_score")
             
             # Only set if it's a valid number > 0
             if val is not None and isinstance(val, (int, float)) and val > 0:
@@ -421,6 +561,18 @@ def compare_institutions(batch_ids: str = Query(..., description="Comma-separate
             if kpi_key not in comparison_matrix:
                 comparison_matrix[kpi_key] = {}
             comparison_matrix[kpi_key][short_label] = val
+    
+    # DEPARTMENT GOVERNANCE: Check for cross-department comparison
+    if len(departments_seen) > 0:
+        unique_departments = set(departments_seen.values())
+        if len(unique_departments) > 1:
+            return ComparisonResponse(
+                institutions=valid_institutions,
+                skipped_batches=skipped_batches,
+                comparison_matrix=comparison_matrix,
+                valid_for_comparison=False,
+                validation_message=f"Cross-department comparison not allowed. Found departments: {', '.join(unique_departments)}"
+            )
     
     # Check if we have enough valid institutions
     if len(valid_institutions) < 2:
@@ -496,7 +648,7 @@ def compare_institutions(batch_ids: str = Query(..., description="Comma-separate
         notes=notes,
     )
     
-    return ComparisonResponse(
+    result = ComparisonResponse(
         institutions=valid_institutions,
         skipped_batches=skipped_batches,
         comparison_matrix=comparison_matrix,
@@ -509,3 +661,7 @@ def compare_institutions(batch_ids: str = Query(..., description="Comma-separate
         valid_for_comparison=True,
         validation_message=None,
     )
+    
+    # PERFORMANCE: Cache result
+    cache.set(cache_key, result)
+    return result

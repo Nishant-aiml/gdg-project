@@ -525,8 +525,8 @@ def compute_overall_breakdown(fsr: KPIBreakdown, infra: KPIBreakdown, placement:
     )
 
 
-def get_kpi_details(batch_id: str) -> KPIDetailsResponse:
-    """Get full KPI breakdown for a batch."""
+def get_kpi_details(batch_id: str, kpi_type: Optional[str] = None) -> KPIDetailsResponse:
+    """Get full KPI breakdown for a batch. Optionally filter by kpi_type."""
     db = get_db()
     try:
         batch = db.query(Batch).filter(Batch.id == batch_id).first()

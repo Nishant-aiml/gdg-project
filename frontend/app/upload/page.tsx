@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { documentApi, processingApi } from '@/lib/api';
 import toast from 'react-hot-toast';
 import { Upload, FileText, X, Check, CloudUpload, File, ArrowRight, Home } from 'lucide-react';
+import ProtectedRoute from '@/components/ProtectedRoute';
+
 
 function UploadPageContent() {
   const router = useRouter();
@@ -15,6 +17,11 @@ function UploadPageContent() {
   const [uploading, setUploading] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const [dragActive, setDragActive] = useState(false);
+
+  // PLATFORM MODEL: Institution/Department metadata
+  const [institutionName, setInstitutionName] = useState<string>('');
+  const [departmentName, setDepartmentName] = useState<string>('');
+  const [academicYear, setAcademicYear] = useState<string>('');
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -142,6 +149,58 @@ function UploadPageContent() {
           </h1>
           <p className="text-gray-600">
             Upload institutional documents (PDF, Excel, CSV, Word) for analysis
+          </p>
+        </div>
+
+        {/* PLATFORM MODEL: Institution/Department Metadata Form */}
+        <div className="bg-white rounded-3xl shadow-soft-lg p-8 mb-8 animate-fade-in">
+          <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
+            <FileText className="w-5 h-5 text-primary" />
+            Institution & Department Information
+          </h2>
+          <p className="text-sm text-gray-500 mb-6">
+            Provide institution and department details for department-wise tracking and historical analysis.
+          </p>
+          <div className="grid md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Institution Name <span className="text-gray-400">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                value={institutionName}
+                onChange={(e) => setInstitutionName(e.target.value)}
+                placeholder="e.g., ABC University"
+                className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Department Name <span className="text-gray-400">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                value={departmentName}
+                onChange={(e) => setDepartmentName(e.target.value)}
+                placeholder="e.g., Computer Science"
+                className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Academic Year <span className="text-gray-400">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                value={academicYear}
+                onChange={(e) => setAcademicYear(e.target.value)}
+                placeholder="e.g., 2024-25"
+                className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 mt-4">
+            💡 These fields can also be extracted automatically from your documents. Leave blank if unsure.
           </p>
         </div>
 

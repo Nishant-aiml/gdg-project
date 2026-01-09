@@ -33,6 +33,60 @@ UGC_BLOCKS = [
     "future_academic_plan"  # Only populated for new universities
 ]
 
+# NBA - Outcome Based Education Blocks (Department Level)
+# STRICT: These are COMPLETELY DIFFERENT from AICTE blocks
+NBA_BLOCKS = [
+    "co_definitions",           # Course Outcome definitions
+    "co_po_mapping",            # CO-PO mapping tables (1,2,3 levels)
+    "co_pso_mapping",           # CO-PSO mapping tables
+    "student_attainment",       # Student performance data per CO
+    "indirect_assessment",      # Alumni/Employer feedback
+    "atr_document",             # Action Taken Report
+    "peo_statement",            # Program Educational Objectives
+    "attainment_target",        # Approved attainment threshold
+    "course_list",              # List of courses
+    "improvement_actions"       # Continuous improvement records
+]
+
+# NAAC - Institutional Quality Criteria (7 Criteria)
+# STRICT: These are COMPLETELY DIFFERENT from AICTE/NBA blocks
+NAAC_BLOCKS = [
+    "iqac_report",              # C1: IQAC annual report
+    "ssr_document",             # Self-Study Report
+    "aar_report",               # Annual Academic Report
+    "curricular_aspects",       # C1: Curriculum design & delivery
+    "teaching_learning",        # C2: Teaching-Learning & Evaluation
+    "research_outreach",        # C3: Research, Innovations, Extension
+    "infrastructure_resources", # C4: Infrastructure and Learning Resources
+    "student_support",          # C5: Student Support and Progression
+    "governance_leadership",    # C6: Governance, Leadership, Management
+    "institutional_values",     # C7: Institutional Values & Best Practices
+    "student_feedback",         # Student satisfaction survey
+    "alumni_feedback",          # Alumni feedback data
+    "employer_feedback",        # Employer satisfaction data
+    "placement_statistics",     # Placement and progression data
+    "research_publications",    # Research output data
+    "extension_activities"      # Community outreach activities
+]
+
+# NIRF - National Institutional Ranking Framework (5 Parameters)
+# STRICT: These are COMPLETELY DIFFERENT from other modes
+NIRF_BLOCKS = [
+    "student_strength",         # TLR: Student enrollment data
+    "faculty_count",            # TLR: Faculty data with qualifications
+    "financial_resources",      # TLR: Financial resources & utilization
+    "research_papers",          # RP: Publications and citations
+    "ipr_patents",              # RP: IPR and patents
+    "sponsored_projects",       # RP: Funded research projects
+    "graduation_outcomes",      # GO: Graduation rate & placement
+    "median_salary",            # GO: Median salary of graduates
+    "higher_studies",           # GO: Students pursuing higher education
+    "outreach_programs",        # OI: Outreach and inclusivity
+    "diversity_data",           # OI: Women, economically/socially challenged
+    "facilities_disabled",      # OI: Facilities for differently-abled
+    "perception_survey"         # PR: Perception survey data (MANDATORY for PR score)
+]
+
 # Block descriptions for semantic classification
 BLOCK_DESCRIPTIONS = {
     # AICTE Blocks
@@ -466,27 +520,60 @@ BLOCK_FIELDS = {
 def get_information_blocks(mode: str = None, new_university: bool = False) -> List[str]:
     """
     Get list of information blocks for a specific mode.
-    If mode is None, returns AICTE blocks (default).
     
-    For UGC mode:
-    - If new_university=True: includes future_academic_plan (10 blocks)
-    - If new_university=False (renewal): excludes future_academic_plan (9 blocks)
+    STRICT MODE ISOLATION:
+    - AICTE: Institution/Department compliance blocks
+    - NBA: OBE blocks (CO, PO, PSO, attainment)
+    - NAAC: 7 Criteria blocks (C1-C7)
+    - NIRF: 5 Parameter blocks (TLR, RP, GO, OI, PR)
+    
+    Raises ValueError for unknown modes.
     """
     if mode is None:
         return AICTE_BLOCKS.copy()
     
     mode_lower = mode.lower()
+    
     if mode_lower == "aicte":
         return AICTE_BLOCKS.copy()
     elif mode_lower == "ugc":
-        blocks = UGC_BLOCKS.copy()
-        # Only include future_academic_plan for new universities
-        if not new_university:
-            blocks = [b for b in blocks if b != "future_academic_plan"]
-        return blocks
+        return UGC_BLOCKS.copy()
+    elif mode_lower == "nba":
+        return NBA_BLOCKS.copy()  # STRICT: NBA uses ONLY NBA blocks
+    elif mode_lower == "naac":
+        return NAAC_BLOCKS.copy()  # STRICT: NAAC uses ONLY NAAC blocks
+    elif mode_lower == "nirf":
+        return NIRF_BLOCKS.copy()  # STRICT: NIRF uses ONLY NIRF blocks
+    elif mode_lower == "mixed":
+        # Mixed mode: combine AICTE and UGC for backward compatibility
+        return AICTE_BLOCKS.copy() + UGC_BLOCKS.copy()
     else:
-        # Default to AICTE for unknown modes
-        return AICTE_BLOCKS.copy()
+        # STRICT: Unknown mode is an ERROR, not a fallback
+        raise ValueError(
+            f"Unknown mode: {mode}. Supported modes: AICTE, NBA, NAAC, NIRF, UGC, mixed"
+        )
+
+
+def validate_document_for_mode(document_type: str, mode: str) -> tuple:
+    """
+    Validate if a document type is allowed for the selected mode.
+    
+    Returns: (is_valid, error_message)
+    
+    STRICT: Cross-mode documents are REJECTED.
+    """
+    mode_lower = mode.lower()
+    allowed_blocks = get_information_blocks(mode)
+    
+    if document_type in allowed_blocks:
+        return True, None
+    
+    # Build helpful error message
+    mode_name = mode.upper()
+    return False, (
+        f"Document type '{document_type}' is not allowed in {mode_name} mode. "
+        f"Allowed types: {', '.join(allowed_blocks)}"
+    )
 
 def get_block_description(block_id: str) -> Dict[str, Any]:
     """Get description and keywords for a block"""

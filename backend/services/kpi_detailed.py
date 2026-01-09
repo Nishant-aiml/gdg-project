@@ -53,22 +53,114 @@ def get_kpi_detailed_breakdown(batch_id: str, kpi_type: str) -> Dict[str, Any]:
         mode = batch.mode or "aicte"
         kpi_service = KPIService()
         
-        # Compute detailed breakdown based on KPI type
-        if kpi_type == "fsr":
-            return _compute_fsr_detailed(aggregated_data, mode, evidence_map)
-        elif kpi_type == "infrastructure":
-            return _compute_infrastructure_detailed(aggregated_data, mode, evidence_map)
-        elif kpi_type == "placement":
-            return _compute_placement_detailed(aggregated_data, mode, evidence_map)
-        elif kpi_type == "lab":
-            return _compute_lab_detailed(aggregated_data, mode, evidence_map)
-        elif kpi_type == "overall":
-            return _compute_overall_detailed(batch_id, aggregated_data, mode, evidence_map, blocks)
-        else:
-            raise ValueError(f"Invalid KPI type: {kpi_type}")
+        # PRODUCTION HARDENING: Use official KPI service for all modes
+        from services.kpi_official import OfficialKPIService
+        from services.evidence_tracker import EvidenceTracker
+        
+        official_service = OfficialKPIService()
+        
+        # Build proper evidence map from blocks
+        block_dicts = [{
+            "data": block.data or {},
+            "evidence_snippet": block.evidence_snippet,
+            "evidence_page": block.evidence_page,
+            "source_doc": block.source_doc
+        } for block in blocks]
+        evidence_map = EvidenceTracker.build_evidence_map(block_dicts)
+        
+        # Compute detailed breakdown based on KPI type and mode
+        if mode.lower() == "aicte":
+            if kpi_type == "fsr":
+                return _compute_fsr_detailed(aggregated_data, mode, evidence_map)
+            elif kpi_type == "infrastructure":
+                return _compute_infrastructure_detailed(aggregated_data, mode, evidence_map)
+            elif kpi_type == "placement":
+                return _compute_placement_detailed(aggregated_data, mode, evidence_map)
+            elif kpi_type == "lab":
+                return _compute_lab_detailed(aggregated_data, mode, evidence_map)
+            elif kpi_type == "overall":
+                return _compute_overall_detailed(batch_id, aggregated_data, mode, evidence_map, blocks)
+        elif mode.lower() == "nba":
+            # NBA mode - use official service
+            if kpi_type == "peos_psos":
+                score, info = official_service.calculate_nba_peos_psos(aggregated_data, evidence_map)
+            elif kpi_type == "faculty_quality":
+                score, info = official_service.calculate_nba_faculty_quality(aggregated_data, evidence_map)
+            elif kpi_type == "student_performance":
+                score, info = official_service.calculate_nba_student_performance(aggregated_data, evidence_map)
+            elif kpi_type == "continuous_improvement":
+                score, info = official_service.calculate_nba_continuous_improvement(aggregated_data, evidence_map)
+            elif kpi_type == "co_po_mapping":
+                score, info = official_service.calculate_nba_co_po_mapping(aggregated_data, evidence_map)
+            elif kpi_type == "overall":
+                return _compute_overall_detailed(batch_id, aggregated_data, mode, evidence_map, blocks)
+            else:
+                raise ValueError(f"Invalid NBA KPI type: {kpi_type}")
+            
+            if kpi_type != "overall":
+                return _format_kpi_details(kpi_type, score, info, evidence_map)
+        elif mode.lower() == "naac":
+            # NAAC mode - use official service
+            if kpi_type.startswith("criterion_"):
+                score, info = official_service.calculate_naac_criterion(kpi_type, aggregated_data, evidence_map)
+                return _format_kpi_details(kpi_type, score, info, evidence_map)
+            elif kpi_type == "overall":
+                return _compute_overall_detailed(batch_id, aggregated_data, mode, evidence_map, blocks)
+        elif mode.lower() == "nirf":
+            # NIRF mode - use official service
+            if kpi_type in ["tlr", "rp", "go", "oi", "pr"]:
+                score, info = official_service.calculate_nirf_parameter(kpi_type, aggregated_data, evidence_map)
+                return _format_kpi_details(kpi_type, score, info, evidence_map)
+            elif kpi_type == "overall":
+                return _compute_overall_detailed(batch_id, aggregated_data, mode, evidence_map, blocks)
+        
+        raise ValueError(f"Invalid KPI type '{kpi_type}' for mode '{mode}'")
     
     finally:
         close_db(db)
+
+
+def _format_kpi_details(kpi_type: str, score: Optional[float], info: Dict[str, Any], evidence_map: Dict[str, Any]) -> Dict[str, Any]:
+    """Format KPI details response from official service output."""
+    parameters = []
+    formula_steps = []
+    
+    # Extract parameters from info
+    if "components" in info:
+        for comp_name, comp_score in info["components"].items():
+            evidence = info.get("evidence", {}).get(comp_name, {})
+            parameters.append({
+                "parameter_name": comp_name,
+                "raw_value": evidence.get("value"),
+                "normalized_value": comp_score,
+                "score": comp_score,
+                "contribution": info.get("weights", {}).get(comp_name, 0),
+                "evidence": {
+                    "snippet": evidence.get("snippet", ""),
+                    "page": evidence.get("page", 1),
+                    "source_doc": evidence.get("source_doc", "")
+                }
+            })
+    
+    # Formula steps
+    if "formula" in info:
+        formula_steps.append({
+            "step": 1,
+            "description": info["formula"],
+            "result": score
+        })
+    
+    return {
+        "kpi_type": kpi_type,
+        "score": score,
+        "formula_text": info.get("formula", ""),
+        "parameters": parameters,
+        "formula_steps": formula_steps,
+        "missing_parameters": info.get("excluded", []),
+        "data_quality": "complete" if score is not None else "incomplete",
+        "confidence": 1.0 if score is not None else 0.0,
+        "evidence": info.get("evidence", {})
+    }
 
 
 def _compute_fsr_detailed(data: Dict, mode: str, evidence_map: Dict) -> Dict[str, Any]:
@@ -135,45 +227,52 @@ def _compute_fsr_detailed(data: Dict, mode: str, evidence_map: Dict) -> Dict[str
         "evidence": student_evidence
     })
     
-    # Calculate FSR score (same logic as kpi.py)
+    # Calculate FSR score - OFFICIAL FORMULA
+    # FSR = Total Students / Total Faculty (NOT Faculty/Students)
     final_score = None
     if faculty_count is not None and student_count is not None:
         if student_count == 0 or faculty_count == 0:
             final_score = None
         else:
-            fsr = faculty_count / student_count
+            # OFFICIAL FORMULA: FSR = Students / Faculty
+            fsr = student_count / faculty_count
             
             calculation_steps.append({
                 "step": 1,
                 "description": "Calculate Faculty-Student Ratio",
-                "formula": f"FSR = faculty_count / student_count = {faculty_count} / {student_count}",
+                "formula": f"FSR = student_count / faculty_count = {student_count} / {faculty_count}",
                 "result": round(fsr, 4)
             })
             
-            # Exact formula from kpi.py
-            if fsr >= 0.05:  # 1/20
+            # Official scoring rule
+            if fsr <= 15:
                 final_score = 100.0
                 calculation_steps.append({
                     "step": 2,
-                    "description": "Compare with AICTE norm (1:20 = 0.05)",
-                    "formula": "FSR >= 0.05 → Score = 100",
+                    "description": "Compare with AICTE norm (FSR ≤ 15)",
+                    "formula": "FSR ≤ 15 → Score = 100",
                     "result": 100.0
                 })
-            elif fsr >= 0.04:  # 1/25
-                final_score = 60.0
+            elif fsr <= 20:
+                # Linear scale: 100 at FSR=15, 60 at FSR=20
+                score = 100 + (fsr - 15) * (-8)
+                final_score = round(score, 2)
                 calculation_steps.append({
                     "step": 2,
-                    "description": "Compare with AICTE norm (1:25 = 0.04)",
-                    "formula": "0.04 <= FSR < 0.05 → Score = 60",
-                    "result": 60.0
+                    "description": "Linear scale (15 < FSR ≤ 20)",
+                    "formula": f"Score = 100 + (FSR - 15) × (-8) = 100 + ({fsr} - 15) × (-8)",
+                    "result": final_score
                 })
             else:
-                final_score = 0.0
+                # Proportional penalty: FSR > 20
+                penalty = (fsr - 20) * 3
+                score = max(0.0, 60.0 - penalty)
+                final_score = round(score, 2)
                 calculation_steps.append({
                     "step": 2,
-                    "description": "Below minimum norm",
-                    "formula": "FSR < 0.04 → Score = 0",
-                    "result": 0.0
+                    "description": "Proportional penalty (FSR > 20)",
+                    "formula": f"Score = 60 - (FSR - 20) × 3 = 60 - ({fsr} - 20) × 3",
+                    "result": final_score
                 })
     
     return {
@@ -186,7 +285,7 @@ def _compute_fsr_detailed(data: Dict, mode: str, evidence_map: Dict) -> Dict[str
         },
         "parameters": parameters,
         "calculation_steps": calculation_steps,
-        "formula": "FSR >= 0.05 → 100, 0.04 <= FSR < 0.05 → 60, FSR < 0.04 → 0",
+        "formula": "FSR = Students / Faculty; FSR ≤ 15 → 100, 15 < FSR ≤ 20 → linear (100→60), FSR > 20 → penalty",
         "evidence": {}
     }
 

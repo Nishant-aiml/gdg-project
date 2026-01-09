@@ -20,12 +20,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create storage directories
-RUN mkdir -p storage/uploads storage/reports storage/evidence storage/db templates
+# Create data directories for SQLite and file storage
+# NOTE: Mount persistent volume at /data on Railway
+RUN mkdir -p /data data storage/uploads storage/reports storage/evidence templates
 
-# Set environment variables
+# Set environment variables for production
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV SQLITE_DB_PATH=/data/app.db
+ENV UPLOAD_DIR=/data/uploads
+ENV REPORTS_DIR=/data/reports
 
 EXPOSE 8000
 
@@ -33,5 +37,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
-# Start command - Railway overrides with $PORT
+# Start command - Railway uses $PORT
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+

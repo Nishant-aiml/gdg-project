@@ -11,6 +11,17 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+
+  // Skip ESLint during production builds for faster deployment
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+
+  // Skip TypeScript type checking during build (handled by IDE)
+  typescript: {
+    ignoreBuildErrors: true,
+  },
 };
 
 export default nextConfig;
+

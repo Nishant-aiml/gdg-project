@@ -411,36 +411,33 @@ Rules:
 """
 
         try:
-            # Retry wrapper around safe_openai_call for robustness
-            import time
+            # Direct API call - no threading wrapper (faster and more reliable)
+            logger.info(f"=== Starting extraction with context length: {len(full_context_text)} chars ===")
+            
+            response = safe_openai_call(
+                self.ai_client.client,
+                self.ai_client.primary_model,
+                [
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": user_message},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.0,
+                timeout=120  # 120 second timeout for complex documents
+            )
 
-            max_attempts = 3
-            for attempt in range(max_attempts):
-                try:
-                    response = safe_openai_call(
-                        self.ai_client.client,
-                        self.ai_client.primary_model,
-                        [
-                            {"role": "system", "content": system_message},
-                            {"role": "user", "content": user_message},
-                        ],
-                        response_format={"type": "json_object"},
-                        temperature=0.0,
-                    )
-                    break
-                except Exception as call_err:
-                    logger.warning(f"Extraction attempt {attempt + 1} failed: {call_err}")
-                    if attempt == max_attempts - 1:
-                        raise
-                    time.sleep(1.0)
-
+            logger.info(f"=== OpenAI response received ===")
             result_text = response.choices[0].message.content
+            logger.info(f"=== Response length: {len(result_text)} chars ===")
             result = parse_json_safely(result_text)
+            logger.info(f"=== Parsed result keys: {list(result.keys()) if isinstance(result, dict) else 'NOT A DICT'} ===")
 
             # Normalize result into expected block structure
             # Result may either be { "blocks": { ... } } (new AICTE schema)
             # or flat { "faculty_information": {...}, ... } (older style).
             root_blocks = result.get("blocks") if isinstance(result, dict) and "blocks" in result else result
+            logger.info(f"=== Root blocks type: {type(root_blocks)}, keys: {list(root_blocks.keys()) if isinstance(root_blocks, dict) else 'N/A'} ===")
+
 
             # Helper to flatten nested structures (e.g., {"totals": {"total": 112}} -> {"total": 112})
             def flatten_nested_dict(d: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
@@ -600,10 +597,19 @@ Rules:
             }
 
         except Exception as e:
-            logger.error(f"One-shot extraction error: {e}")
             import traceback
-
-            logger.error(traceback.format_exc())
+            error_msg = f"One-shot extraction error: {e}"
+            stack_trace = traceback.format_exc()
+            
+            # Make error VERY visible
+            print(f"\n{'='*60}")
+            print(f"!!! EXTRACTION ERROR !!!")
+            print(f"Error: {error_msg}")
+            print(f"Stack trace:\n{stack_trace}")
+            print(f"{'='*60}\n")
+            
+            logger.error(error_msg)
+            logger.error(stack_trace)
 
             # Return empty blocks on error
             required_blocks = get_information_blocks(mode, new_university)
@@ -614,3 +620,4 @@ Rules:
                 "confidence": 0.0,
                 "evidence": [],
             }
+

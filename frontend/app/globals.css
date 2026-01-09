@@ -260,3 +260,98 @@ html {
   background: var(--primary-100);
   color: var(--primary-dark);
 }
+
+/* ========== MOBILE RESPONSIVE UTILITIES ========== */
+
+/* Scrollable table container for mobile */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Touch-friendly buttons */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Mobile-friendly cards */
+@media (max-width: 640px) {
+  .card {
+    border-radius: 12px;
+    padding: 1rem;
+  }
+  
+  /* Smaller text on mobile */
+  .text-responsive {
+    font-size: 0.875rem;
+  }
+  
+  /* Stack flex items on mobile */
+  .mobile-stack {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  
+  /* Full width buttons on mobile */
+  .mobile-full {
+    width: 100%;
+  }
+  
+  /* Hide on mobile */
+  .hide-mobile {
+    display: none !important;
+  }
+}
+
+/* Show only on mobile */
+@media (min-width: 641px) {
+  .show-mobile-only {
+    display: none !important;
+  }
+}
+
+/* Sticky bottom actions for mobile */
+.sticky-bottom-mobile {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 1rem;
+  background: white;
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1);
+  z-index: 40;
+}
+
+@media (min-width: 768px) {
+  .sticky-bottom-mobile {
+    position: static;
+    padding: 0;
+    background: transparent;
+    border-top: none;
+    box-shadow: none;
+  }
+}
+
+/* Mobile-friendly charts */
+.chart-container {
+  width: 100%;
+  min-height: 250px;
+  overflow-x: auto;
+}
+
+@media (max-width: 640px) {
+  .chart-container {
+    min-height: 200px;
+  }
+}
+
+/* Safe area padding for iOS */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+

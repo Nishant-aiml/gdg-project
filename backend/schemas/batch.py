@@ -9,9 +9,11 @@ from models.batch import ReviewerMode, BatchStatus
 class BatchCreate(BaseModel):
     mode: ReviewerMode = Field(..., description="UGC or AICTE mode")
     new_university: Optional[bool] = Field(False, description="True if new university (UGC only), False for renewal")
-    institution_name: Optional[str] = None
-    institution_code: Optional[str] = None
-    academic_year: Optional[str] = None
+    # Department-wise hierarchy (MANDATORY for platform)
+    institution_name: Optional[str] = Field(None, description="Institution name (will be extracted from documents if not provided)")
+    department_name: Optional[str] = Field(None, description="Department name (e.g., 'Computer Science', 'Mechanical Engineering')")
+    academic_year: Optional[str] = Field(None, description="Academic year (e.g., '2024-25', '2025-26')")
+    institution_code: Optional[str] = None  # Legacy field
 
 class BatchResponse(BaseModel):
     batch_id: str

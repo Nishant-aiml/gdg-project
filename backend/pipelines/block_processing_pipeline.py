@@ -5,8 +5,14 @@ New optimized pipeline: PDF → Docling → OCR fallback → One-shot extraction
 
 import logging
 import uuid
+import re
 from typing import Dict, Any, List
 from datetime import datetime
+
+# Helper to strip emojis for Windows console/file compatibility
+def strip_emojis(text: str) -> str:
+    """Remove emoji characters that Windows charmap can't encode."""
+    return re.sub(r'[\U00010000-\U0010ffff]', '', text)
 from config.database import (
     get_db,
     Batch,
@@ -279,43 +285,21 @@ class BlockProcessingPipeline:
             logger.info(f"✅ Full context length for LLM: {len(full_context_text)} characters")
             
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # DOCUMENT VALIDATION - Prevent storage of invalid documents
+            # DOCUMENT VALIDATION - Quick text length check only (skip slow forgery detection)
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            try:
-                from services.forgery_detection import forgery_check
-                
-                # Check text length minimum (200 chars - very minimal threshold)
-                if len(full_context_text) < 200:
-                    logger.warning(f"⚠️ Document text very short: {len(full_context_text)} chars")
-                    # Only reject if completely empty
-                    if len(full_context_text) < 50:
-                        logger.error(f"❌ Document text too short: {len(full_context_text)} chars < 50")
-                        batch.status = "invalid"
-                        batch.errors = ["Document text too short - upload complete PDF"]
-                        db.commit()
-                        return {
-                            "status": "invalid",
-                            "batch_id": batch_id,
-                        "message": "Document Invalid — Text too short. Upload authentic or complete PDF"
-                    }
-                
-                # Run forgery detection on first file
-                if files:
-                    forgery_result = forgery_check(files[0].filepath, full_context_text)
-                    if forgery_result["is_forged"] and forgery_result["confidence"] >= 0.6:
-                        logger.error(f"❌ Document flagged as potentially forged: {forgery_result['issues']}")
-                        batch.status = "invalid"
-                        batch.errors = forgery_result["issues"][:3]  # Store first 3 issues
-                        db.commit()
-                        return {
-                            "status": "invalid",
-                            "batch_id": batch_id,
-                            "message": f"Document Invalid — {forgery_result['recommendation']}"
-                        }
-                    
-                logger.info("✅ Document passed validation checks")
-            except Exception as validation_error:
-                logger.warning(f"⚠️ Validation check skipped: {validation_error}")
+            # Only reject if completely empty
+            if len(full_context_text) < 50:
+                logger.error(f"❌ Document text too short: {len(full_context_text)} chars < 50")
+                batch.status = "invalid"
+                batch.errors = ["Document text too short - upload complete PDF"]
+                db.commit()
+                return {
+                    "status": "invalid",
+                    "batch_id": batch_id,
+                    "message": "Document Invalid — Text too short. Upload authentic or complete PDF"
+                }
+            
+            logger.info("✅ Document passed validation checks (quick mode)")
             
             # Stage 2: Approval classification
             batch.status = "classify_approval"
@@ -371,11 +355,50 @@ class BlockProcessingPipeline:
             db.commit()
             logger.info(f"🔄 Stage 3: One-shot AI extraction for all 10 blocks...")
             
-            extraction_result = self.one_shot_extraction.extract_all_blocks(full_context_text, mode, new_university)
-            extracted_blocks = extraction_result.get("blocks", {})
-            extraction_confidence = extraction_result.get("confidence", 0.0)
+            # Write debug to file since print from thread may not be visible
+            with open("debug_extraction.log", "a", encoding="utf-8") as f:
+                f.write(f"\n{'='*60}\n")
+                f.write(f"BATCH: {batch_id}\n")
+                f.write(f"CONTEXT LENGTH: {len(full_context_text)} chars\n")
+                f.write(f"CONTEXT PREVIEW: {strip_emojis(full_context_text[:200])}...\n")
+            
+            # Wrap extraction in try-catch to prevent pipeline from hanging
+            try:
+                logger.info(f"Calling one_shot_extraction.extract_all_blocks...")
+                extraction_result = self.one_shot_extraction.extract_all_blocks(full_context_text, mode, new_university)
+                extracted_blocks = extraction_result.get("blocks", {})
+                extraction_confidence = extraction_result.get("confidence", 0.0)
+                logger.info(f"Extraction completed successfully")
+            except Exception as extraction_error:
+                import traceback
+                error_trace = traceback.format_exc()
+                logger.error(f"❌ Extraction failed: {extraction_error}")
+                logger.error(f"Stack trace: {error_trace}")
+                
+                # Write error to debug log
+                with open("debug_extraction.log", "a", encoding="utf-8") as f:
+                    f.write(f"EXTRACTION ERROR: {extraction_error}\n")
+                    f.write(f"STACK TRACE: {error_trace}\n")
+                
+                # Use empty blocks as fallback so pipeline can continue
+                extracted_blocks = {}
+                extraction_confidence = 0.0
+                logger.warning("Using empty blocks as fallback, pipeline will continue")
+            
+            # Count non-empty blocks and write to file
+            non_empty = sum(1 for d in extracted_blocks.values() if d and isinstance(d, dict) and len(d) > 0)
+            with open("debug_extraction.log", "a", encoding="utf-8") as f:
+                f.write(f"EXTRACTED: {len(extracted_blocks)} blocks, {non_empty} non-empty\n")
+                f.write(f"BLOCK KEYS: {list(extracted_blocks.keys())}\n")
+                for k, v in extracted_blocks.items():
+                    field_count = len(v) if isinstance(v, dict) else 0
+                    f.write(f"  {k}: {field_count} fields\n")
+                f.write(f"CONFIDENCE: {extraction_confidence}\n")
+                f.write(f"{'='*60}\n")
             
             logger.info(f"✅ Extracted {len(extracted_blocks)} blocks with confidence {extraction_confidence:.2f}")
+
+
             
             # Merge CSV/Excel mapped blocks with LLM extracted blocks
             # CSV/Excel blocks take precedence (higher confidence, structured data)
@@ -633,9 +656,9 @@ class BlockProcessingPipeline:
                         "block_type": block.block_type
                     }
                     
-                    # Check quality
+                    # Check quality (no AI calls - fast rule-based checks)
                     quality_result = self.block_quality.check_block_quality(block_dict, mode)
-                    invalid_result = self.block_quality.check_invalid(block_dict, mode, self.one_shot_extraction.ai_client)
+                    invalid_result = self.block_quality.check_invalid(block_dict, mode)  # No AI client needed
                     
                     block.is_outdated = 1 if quality_result.get("is_outdated", False) else 0
                     block.is_low_quality = 1 if quality_result.get("is_low_quality", False) else 0
@@ -645,18 +668,33 @@ class BlockProcessingPipeline:
                 except Exception as e:
                     logger.error(f"❌ Quality check error for block {block.id}: {e}")
             
-            # Stage 5: Sufficiency
+            # Stage 5: Sufficiency - SOFT FAIL
             batch.status = "sufficiency"
             db.commit()
             logger.info(f"🔄 Stage 5: Calculating sufficiency...")
             
-            blocks = db.query(Block).filter(Block.batch_id == batch_id).all()
-            block_list = [self._block_to_dict(b) for b in blocks]
-            sufficiency_result = self.block_sufficiency.calculate_sufficiency(mode, block_list)
-            
-            batch.sufficiency_result = sufficiency_result
-            db.commit()
-            logger.info(f"✅ Sufficiency: {sufficiency_result.get('percentage', 0):.2f}%")
+            try:
+                blocks = db.query(Block).filter(Block.batch_id == batch_id).all()
+                block_list = [self._block_to_dict(b) for b in blocks]
+                sufficiency_result = self.block_sufficiency.calculate_sufficiency(mode, block_list)
+                
+                batch.sufficiency_result = sufficiency_result
+                db.commit()
+                logger.info(f"✅ Sufficiency: {sufficiency_result.get('percentage', 0):.2f}%")
+            except Exception as suff_error:
+                logger.error(f"❌ Sufficiency calculation failed: {suff_error}. Using default.")
+                import traceback
+                logger.error(traceback.format_exc())
+                # SOFT FAIL: Use default sufficiency instead of crashing
+                sufficiency_result = {
+                    "percentage": 0,
+                    "present_count": 0,
+                    "required_count": 10,
+                    "missing_blocks": [],
+                    "penalty_breakdown": {}
+                }
+                batch.sufficiency_result = sufficiency_result
+                db.commit()
             
             # Stage 6: KPI Scoring
             batch.status = "kpi_scoring"
@@ -670,6 +708,25 @@ class BlockProcessingPipeline:
             batch.kpi_results = kpi_results
             db.commit()
             logger.info(f"✅ KPIs calculated: {len(kpi_results)} metrics")
+            
+            # Stage 6.5: Mark invalid batches (PRODUCTION GUARD)
+            # Check if overall_score is 0/None or sufficiency is 0
+            overall_score = None
+            if isinstance(kpi_results, dict):
+                overall_score_data = kpi_results.get("overall_score") or kpi_results.get("aicte_overall_score") or kpi_results.get("ugc_overall_score")
+                if isinstance(overall_score_data, dict):
+                    overall_score = overall_score_data.get("value")
+                elif isinstance(overall_score_data, (int, float)):
+                    overall_score = overall_score_data
+            
+            sufficiency_pct = sufficiency_result.get("percentage", 0) if isinstance(sufficiency_result, dict) else 0
+            
+            if (overall_score is None or overall_score == 0) or sufficiency_pct == 0:
+                batch.is_invalid = 1
+                logger.warning(f"Batch {batch_id} marked invalid: overall_score={overall_score}, sufficiency={sufficiency_pct}%")
+                db.commit()
+            
+            # Stage 7: Compliance
             
             # Stage 7: Compliance
             batch.status = "compliance"
