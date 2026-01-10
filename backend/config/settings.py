@@ -72,6 +72,23 @@ class Settings(BaseSettings):
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        
+        # CRITICAL: Explicit fallback to os.environ for Railway deployment
+        # pydantic-settings may not read env vars correctly when no .env file exists
+        import os
+        
+        # OpenAI API Key - required for AI features
+        if not self.OPENAI_API_KEY:
+            self.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+        
+        # Gemini API Key
+        if not self.GEMINI_API_KEY:
+            self.GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+        
+        # Firebase settings
+        if not self.FIREBASE_PROJECT_ID:
+            self.FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID")
+        
         # Use MONGODB_URI if MONGODB_URL is not set
         if not self.MONGODB_URL and self.MONGODB_URI:
             self.MONGODB_URL = self.MONGODB_URI
@@ -79,3 +96,4 @@ class Settings(BaseSettings):
             self.MONGODB_URL = "mongodb://localhost:27017/"
 
 settings = Settings()
+
