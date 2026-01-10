@@ -72,7 +72,15 @@ function SelectRoleContent() {
             }
 
             toast.success('Account setup complete!');
-            router.push(redirect);
+
+            // Redirect to role-specific dashboard (hard refresh to update auth state)
+            if (selectedRole === 'college') {
+                window.location.href = '/'; // College users go to main dashboard
+            } else if (selectedRole === 'department') {
+                window.location.href = '/nba-dashboard'; // Department users go to NBA dashboard
+            } else {
+                window.location.href = '/dashboard'; // Fallback
+            }
         } catch (error: any) {
             console.error('Set role error:', error);
             toast.error(error.response?.data?.detail || 'Failed to set user type');
@@ -106,8 +114,8 @@ function SelectRoleContent() {
                         type="button"
                         onClick={() => setSelectedRole('department')}
                         className={`w-full p-6 border-2 rounded-2xl transition-all flex items-start gap-4 text-left ${selectedRole === 'department'
-                                ? 'border-primary bg-primary-50 ring-2 ring-primary/20'
-                                : 'border-gray-200 bg-white hover:border-primary/50 hover:bg-gray-50'
+                            ? 'border-primary bg-primary-50 ring-2 ring-primary/20'
+                            : 'border-gray-200 bg-white hover:border-primary/50 hover:bg-gray-50'
                             }`}
                     >
                         <div className={`p-3 rounded-xl ${selectedRole === 'department' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'
@@ -134,8 +142,8 @@ function SelectRoleContent() {
                         type="button"
                         onClick={() => setSelectedRole('college')}
                         className={`w-full p-6 border-2 rounded-2xl transition-all flex items-start gap-4 text-left ${selectedRole === 'college'
-                                ? 'border-primary bg-primary-50 ring-2 ring-primary/20'
-                                : 'border-gray-200 bg-white hover:border-primary/50 hover:bg-gray-50'
+                            ? 'border-primary bg-primary-50 ring-2 ring-primary/20'
+                            : 'border-gray-200 bg-white hover:border-primary/50 hover:bg-gray-50'
                             }`}
                     >
                         <div className={`p-3 rounded-xl ${selectedRole === 'college' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'
