@@ -726,6 +726,19 @@ class BlockProcessingPipeline:
                 logger.warning(f"Batch {batch_id} marked invalid: overall_score={overall_score}, sufficiency={sufficiency_pct}%")
                 db.commit()
             
+            # Stage 6.6: NBA-specific validation (MANDATORY for NBA mode)
+            if mode.lower() == "nba":
+                logger.info("🔄 Stage 6.6: NBA-specific validation...")
+                from services.production_guard import ProductionGuard
+                
+                nba_valid, nba_reason = ProductionGuard.validate_nba_batch(batch, stored_blocks)
+                if not nba_valid:
+                    batch.is_invalid = 1
+                    logger.warning(f"NBA_INVALID_BATCH_REASON: {batch_id} - {nba_reason}")
+                    db.commit()
+                else:
+                    logger.info("✅ NBA batch validation passed")
+            
             # Stage 7: Compliance
             
             # Stage 7: Compliance
@@ -995,6 +1008,40 @@ class BlockProcessingPipeline:
             batch.trend_results = trend_results
             db.commit()
             logger.info(f"✅ Trends extracted")
+            
+            # Stage 10: Extract and store institution name from blocks
+            logger.info("🔄 Stage 10: Extracting institution name from blocks...")
+            institution_name = None
+            
+            # Search for institution name in extracted blocks
+            # Priority order: institution_info block, then any block with institution_name field
+            name_keys = ["institution_name", "institute_name", "college_name", "name", "university_name"]
+            
+            for block in stored_blocks:
+                if institution_name:
+                    break
+                block_data = block.data or {}
+                if not isinstance(block_data, dict):
+                    continue
+                    
+                for key in name_keys:
+                    if key in block_data and block_data[key]:
+                        candidate = str(block_data[key]).strip()
+                        # Validate it looks like an institution name (at least 3 chars, not generic)
+                        if len(candidate) >= 3 and candidate.lower() not in ["null", "none", "n/a", "na", "unknown"]:
+                            institution_name = candidate
+                            logger.info(f"✅ Institution name extracted: {institution_name}")
+                            break
+            
+            # Update batch with extracted institution name
+            if institution_name:
+                batch.institution_name = institution_name
+            else:
+                # Mark batch as invalid if no institution name found
+                batch.is_invalid = 1
+                logger.warning(f"⚠️  Batch {batch_id} marked invalid: Institution name not found in document")
+            
+            db.commit()
             
             # Complete
             batch.status = "completed"

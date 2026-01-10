@@ -78,28 +78,9 @@ def get_processing_status(
     batch_id: str,
     user: Optional[dict] = Depends(get_current_user)
 ):
-    """Get processing status for a batch"""
+    """Get processing status for a batch - only real batches, no demo mode"""
     if batch_id == "undefined" or not batch_id:
         raise HTTPException(status_code=400, detail="Invalid batch_id")
-    
-    # DEMO MODE: Return completed status for demo batches
-    if batch_id.startswith("demo-batch-"):
-        demo_mode_map = {
-            "demo-batch-aicte-2024": "aicte",
-            "demo-batch-ugc-2024": "ugc",
-            "demo-batch-mixed-2024": "mixed",
-            "demo-batch-old": "aicte"
-        }
-        mode = demo_mode_map.get(batch_id, "aicte")
-        return ProcessingStatusResponse(
-            batch_id=batch_id,
-            status="completed",
-            current_stage="Completed",
-            progress=100,
-            total_documents=5,
-            processed_documents=5,
-            errors=[]
-        )
     
     db = get_db()
     

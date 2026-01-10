@@ -43,9 +43,22 @@ self.addEventListener('fetch', (event) => {
   // Network-first strategy for everything else
   event.respondWith(
     fetch(event.request)
-      .catch(() => {
+      .then((response) => {
+        // Return the network response
+        return response;
+      })
+      .catch(async () => {
         // Only fall back to cache if network fails
-        return caches.match(event.request);
+        const cachedResponse = await caches.match(event.request);
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+        // Return a proper error response if nothing is cached
+        return new Response('Network error', {
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: new Headers({ 'Content-Type': 'text/plain' })
+        });
       })
   );
 });

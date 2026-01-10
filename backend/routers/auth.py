@@ -161,10 +161,10 @@ async def set_role(request: SetRoleRequest):
             )
         
         # Validate role
-        if request.role not in ['department', 'institution']:
+        if request.role not in ['department', 'college']:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid role. Must be 'department' or 'institution'"
+                detail="Invalid role. Must be 'department' or 'college'"
             )
         
         # Set custom claims

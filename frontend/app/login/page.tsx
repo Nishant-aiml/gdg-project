@@ -1,20 +1,59 @@
 'use client';
 
-import { useState, Suspense } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { signInWithEmail, signInWithGoogle, loginWithDemo } from '@/lib/auth';
+import { signInWithEmail, signInWithGoogle, handleGoogleRedirectResult, getUserProfile } from '@/lib/auth';
 import toast from 'react-hot-toast';
-import { Mail, Lock, LogIn, ArrowRight, Play } from 'lucide-react';
+import { Mail, Lock, LogIn } from 'lucide-react';
 import Link from 'next/link';
 
 function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get('redirect') || '/dashboard';
+  const redirect = searchParams.get('redirect') || '/';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Handle Google redirect result on page load
+  useEffect(() => {
+    const handleRedirect = async () => {
+      try {
+        const user = await handleGoogleRedirectResult();
+        if (user) {
+          toast.success('Login successful!');
+          await handleSuccessfulLogin();
+        }
+      } catch (error: any) {
+        toast.error(error.message || 'Google login failed');
+      }
+    };
+    handleRedirect();
+  }, []);
+
+  // Check role and redirect accordingly
+  const handleSuccessfulLogin = async () => {
+    try {
+      const profile = await getUserProfile();
+      if (!profile.role) {
+        // No role set - redirect to role selection
+        router.push(`/select-role?redirect=${encodeURIComponent(redirect)}`);
+      } else {
+        // Has role - redirect to role-specific dashboard
+        if (profile.role === 'college') {
+          router.push('/'); // College users go to main dashboard
+        } else if (profile.role === 'department') {
+          router.push('/nba-dashboard'); // Department users go to NBA dashboard
+        } else {
+          router.push(redirect); // Fallback to original redirect
+        }
+      }
+    } catch (error) {
+      // If profile check fails, still redirect to dashboard (will be caught by protected route)
+      router.push(redirect);
+    }
+  };
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,7 +62,7 @@ function LoginPageContent() {
     try {
       await signInWithEmail(email, password);
       toast.success('Login successful!');
-      router.push(redirect);
+      await handleSuccessfulLogin();
     } catch (error: any) {
       toast.error(error.message || 'Login failed');
     } finally {
@@ -35,26 +74,11 @@ function LoginPageContent() {
     setLoading(true);
 
     try {
+      // This triggers a redirect - page will reload after Google auth
       await signInWithGoogle();
-      toast.success('Login successful!');
-      router.push(redirect);
+      // Note: We won't reach this point as the page redirects
     } catch (error: any) {
       toast.error(error.message || 'Google login failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDemoLogin = async () => {
-    setLoading(true);
-
-    try {
-      await loginWithDemo('institution');
-      toast.success('Welcome to Demo Mode!');
-      router.push('/dashboard');
-    } catch (error: any) {
-      toast.error(error.message || 'Demo login failed');
-    } finally {
       setLoading(false);
     }
   };
@@ -68,37 +92,6 @@ function LoginPageContent() {
             Smart Approval <span className="text-primary">AI</span>
           </h1>
           <p className="text-gray-600">Sign in to continue</p>
-        </div>
-
-        {/* Demo Mode Button - Prominent */}
-        <button
-          onClick={handleDemoLogin}
-          disabled={loading}
-          className="w-full bg-gradient-to-r from-secondary to-primary text-white py-4 rounded-xl font-semibold hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mb-6 shadow-lg"
-        >
-          {loading ? (
-            <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
-          ) : (
-            <>
-              <Play className="w-5 h-5" />
-              Explore Demo Mode
-            </>
-          )}
-        </button>
-
-        <div className="text-center text-xs text-gray-500 mb-6 bg-gray-50 p-3 rounded-xl">
-          <span className="font-medium text-primary">✨ No sign-up required!</span><br />
-          Try all features with sample data
-        </div>
-
-        {/* Divider */}
-        <div className="relative mb-6">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-200"></div>
-          </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="px-4 bg-white text-gray-500">Or sign in with account</span>
-          </div>
         </div>
 
         {/* Email/Password Form */}
@@ -153,6 +146,16 @@ function LoginPageContent() {
           </button>
         </form>
 
+        {/* Divider */}
+        <div className="relative mb-6">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-200"></div>
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="px-4 bg-white text-gray-500">Or continue with</span>
+          </div>
+        </div>
+
         {/* Google Sign In */}
         <button
           onClick={handleGoogleLogin}
@@ -203,5 +206,3 @@ export default function LoginPage() {
     </Suspense>
   );
 }
-
-

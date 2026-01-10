@@ -3,10 +3,10 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from './AuthProvider';
-import { signOut, exitDemoMode } from '@/lib/auth';
+import { signOut } from '@/lib/auth';
 import { useState } from 'react';
 import {
-    Home, Upload, BarChart3, GitCompare, Shield, FileText, Sparkles, TrendingUp, Target, LogOut, User, FolderOpen, Play, Menu, X
+    Home, BarChart3, GitCompare, FileText, Sparkles, TrendingUp, LogOut, User, FolderOpen, Play, Menu, X
 } from 'lucide-react';
 
 const navItems = [
@@ -20,7 +20,7 @@ const navItems = [
 export default function Navbar() {
     const pathname = usePathname();
     const router = useRouter();
-    const { user, isDemoMode } = useAuth();
+    const { user } = useAuth();
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     // Don't show navbar on login/signup pages
@@ -28,11 +28,7 @@ export default function Navbar() {
 
     const handleLogout = async () => {
         try {
-            if (isDemoMode) {
-                exitDemoMode();
-            } else {
-                await signOut();
-            }
+            await signOut();
             router.push('/login');
             // Force page reload to clear state
             window.location.href = '/login';
@@ -56,11 +52,6 @@ export default function Navbar() {
                             <span className="text-lg font-bold text-gray-800">
                                 Smart <span className="text-primary hidden sm:inline">Approval AI</span>
                             </span>
-                            {isDemoMode && (
-                                <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-medium border border-amber-200 hidden sm:inline">
-                                    🎮 Demo
-                                </span>
-                            )}
                         </Link>
 
                         {/* Desktop Navigation Items */}
@@ -105,11 +96,8 @@ export default function Navbar() {
                                     <div className="flex items-center gap-2 text-sm text-gray-600">
                                         <User className="w-4 h-4" />
                                         <span className="hidden lg:inline">{user.email}</span>
-                                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isDemoMode
-                                            ? 'bg-amber-100 text-amber-700'
-                                            : 'bg-primary/10 text-primary'
-                                            }`}>
-                                            {isDemoMode ? 'Demo User' : user.role}
+                                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary">
+                                            {user.role}
                                         </span>
                                     </div>
                                     <button
@@ -117,9 +105,7 @@ export default function Navbar() {
                                         className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                     >
                                         <LogOut className="w-4 h-4" />
-                                        <span className="text-sm">
-                                            {isDemoMode ? 'Exit Demo' : 'Logout'}
-                                        </span>
+                                        <span className="text-sm">Logout</span>
                                     </button>
                                 </>
                             ) : (
@@ -213,9 +199,7 @@ export default function Navbar() {
                                     className="w-full flex items-center justify-center gap-2 px-4 py-3 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
                                 >
                                     <LogOut className="w-5 h-5" />
-                                    <span className="text-base font-medium">
-                                        {isDemoMode ? 'Exit Demo' : 'Logout'}
-                                    </span>
+                                    <span className="text-base font-medium">Logout</span>
                                 </button>
                             </div>
                         ) : (
@@ -234,4 +218,3 @@ export default function Navbar() {
         </>
     );
 }
-

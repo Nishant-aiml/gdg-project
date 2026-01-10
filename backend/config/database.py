@@ -108,7 +108,7 @@ class User(Base):
     id = Column(String, primary_key=True)  # user_id (Firebase UID)
     email = Column(String, nullable=False, unique=True, index=True)
     name = Column(String, nullable=True)
-    role = Column(String, default="department")  # institution, department (NO admin)
+    role = Column(String, default="department")  # college, department (NO admin)
     institution_id = Column(String, nullable=True, index=True)  # For college/department users
     department_id = Column(String, nullable=True, index=True)  # For department users only
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

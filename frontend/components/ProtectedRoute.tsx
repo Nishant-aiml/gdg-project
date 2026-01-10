@@ -6,7 +6,7 @@ import { useAuth } from './AuthProvider';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  requiredRole?: 'institution' | 'department';
+  requiredRole?: 'college' | 'department';
 }
 
 export default function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
@@ -22,10 +22,10 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
       }
 
       if (requiredRole) {
-        // Check role
+        // Check role - 'college' is higher level than 'department'
         const roleHierarchy: Record<string, number> = {
           'department': 1,
-          'institution': 2,
+          'college': 2,
         };
 
         const userRoleLevel = roleHierarchy[user.role] || 0;
@@ -58,7 +58,7 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
   if (requiredRole) {
     const roleHierarchy: Record<string, number> = {
       'department': 1,
-      'institution': 2,
+      'college': 2,
     };
 
     const userRoleLevel = roleHierarchy[user.role] || 0;

@@ -186,4 +186,62 @@ class ProductionGuard:
                 return not was_invalid
         
         return False
-
+    
+    @staticmethod
+    def validate_nba_batch(batch: Batch, blocks: list = None) -> Tuple[bool, Optional[str]]:
+        """
+        NBA-specific validation: Evidence-backed OBE data required.
+        
+        Invalid if:
+        - No CO attainment data extracted
+        - No CO-PO mapping extracted
+        - No PO has valid evidence
+        - Overall NBA computation returns NULL
+        
+        Returns: (is_valid, invalid_reason)
+        """
+        # Check mode
+        if batch.mode != "nba":
+            return True, None  # Not NBA mode, skip validation
+        
+        # Check if batch has KPI results
+        kpi_results = batch.kpi_results
+        if not kpi_results:
+            logger.warning(f"NBA_INVALID_BATCH_REASON: {batch.id} - No KPI results computed")
+            return False, "NBA batch has no computed results"
+        
+        # Parse KPI results
+        if isinstance(kpi_results, str):
+            import json
+            try:
+                kpi_results = json.loads(kpi_results)
+            except:
+                logger.warning(f"NBA_INVALID_BATCH_REASON: {batch.id} - Failed to parse KPI results")
+                return False, "Failed to parse NBA results"
+        
+        # Check for NBA-specific scores
+        overall = kpi_results.get("overall_score") if isinstance(kpi_results, dict) else None
+        if overall is None or overall == 0:
+            logger.warning(f"NBA_INVALID_BATCH_REASON: {batch.id} - No overall NBA score")
+            return False, "Overall NBA score is NULL or 0"
+        
+        # Check if blocks have NBA-related data
+        if blocks:
+            nba_relevant_blocks = [b for b in blocks if hasattr(b, 'block_type') and 
+                                   b.block_type in ['co_definitions', 'co_po_mapping', 'student_attainment', 'po_attainment']]
+            if not nba_relevant_blocks:
+                logger.warning(f"NBA_EVIDENCE_MISSING: {batch.id} - No NBA-related blocks found")
+                return False, "No NBA evidence blocks (CO/PO data) extracted"
+        
+        return True, None
+    
+    @staticmethod
+    def mark_nba_batch_invalid(batch: Batch, reason: str, db=None) -> None:
+        """
+        Mark NBA batch as invalid with structured logging.
+        """
+        batch.is_invalid = 1
+        logger.warning(f"NBA_INVALID_BATCH_REASON: {batch.id} - {reason}")
+        
+        if db:
+            db.commit()

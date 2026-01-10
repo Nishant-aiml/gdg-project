@@ -6,7 +6,8 @@
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   signOut as firebaseSignOut,
   User,
@@ -73,7 +74,7 @@ export async function signInWithEmail(email: string, password: string): Promise<
 /**
  * Sign up with email and password
  */
-export async function signUpWithEmail(email: string, password: string, name?: string, role: 'department' | 'institution' = 'department'): Promise<AuthUser> {
+export async function signUpWithEmail(email: string, password: string, name?: string, role: 'department' | 'college' = 'department'): Promise<AuthUser> {
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
 
@@ -113,32 +114,51 @@ export async function signUpWithEmail(email: string, password: string, name?: st
 }
 
 /**
- * Sign in with Google (works for both login and sign up)
- * Follows Firebase best practices for Google authentication
+ * Sign in with Google using redirect (avoids COOP policy issues in Next.js)
+ * This initiates the redirect - the result is handled by handleGoogleRedirectResult
  */
-export async function signInWithGoogle(role?: 'department' | 'institution'): Promise<AuthUser> {
-  try {
-    const result = await signInWithPopup(auth, googleProvider);
-    const user = result.user;
+export async function signInWithGoogle(role?: 'department' | 'college'): Promise<void> {
+  // Store the intended role for after redirect
+  if (role) {
+    localStorage.setItem('pending_google_role', role);
+  }
 
-    // Get additional user info to check if this is a new user
+  // Initiate redirect-based sign in
+  await signInWithRedirect(auth, googleProvider);
+}
+
+/**
+ * Handle Google redirect result (call this on app initialization)
+ * Returns the authenticated user if redirect was successful
+ */
+export async function handleGoogleRedirectResult(): Promise<AuthUser | null> {
+  try {
+    const result = await getRedirectResult(auth);
+
+    if (!result) {
+      return null; // No redirect result pending
+    }
+
+    const user = result.user;
     const additionalInfo = getAdditionalUserInfo(result);
 
+    // Check if we had a pending role to set
+    const pendingRole = localStorage.getItem('pending_google_role') as 'department' | 'college' | null;
+    localStorage.removeItem('pending_google_role');
+
     // If this is a new user and role is provided, set the role
-    if (additionalInfo?.isNewUser && role) {
+    if (additionalInfo?.isNewUser && pendingRole) {
       const idToken = await getIdToken(user);
       try {
         await api.post('/auth/set-role', {
           id_token: idToken,
-          role: role
+          role: pendingRole
         });
         // Get fresh token with custom claims
         const freshToken = await getIdToken(user, true);
         return await loginToBackend(freshToken);
       } catch (roleError: any) {
         console.warn('Failed to set role, continuing with default:', roleError);
-        // Continue even if role setting fails - backend will use default
-        const idToken = await getIdToken(user);
         return await loginToBackend(idToken);
       }
     }
@@ -147,30 +167,18 @@ export async function signInWithGoogle(role?: 'department' | 'institution'): Pro
     const idToken = await getIdToken(user, true);
     return await loginToBackend(idToken);
   } catch (error: any) {
-    // Handle Firebase Auth errors according to best practices
+    // Handle Firebase Auth errors
     const errorCode = error.code;
     const errorMessage = error.message;
-    const email = error.customData?.email;
-    const credential = GoogleAuthProvider.credentialFromError(error);
 
-    // Handle specific error codes
-    if (errorCode === 'auth/popup-closed-by-user') {
-      throw new Error('Sign in was cancelled. Please try again.');
-    } else if (errorCode === 'auth/popup-blocked') {
-      throw new Error('Popup was blocked by your browser. Please allow popups for this site.');
-    } else if (errorCode === 'auth/cancelled-popup-request') {
-      throw new Error('Only one popup request is allowed at a time.');
-    } else if (errorCode === 'auth/account-exists-with-different-credential') {
+    if (errorCode === 'auth/account-exists-with-different-credential') {
       throw new Error('An account already exists with the same email address but different sign-in credentials.');
     } else if (errorCode === 'auth/operation-not-allowed') {
       throw new Error('Google sign-in is not enabled. Please contact support.');
-    } else if (errorCode === 'auth/auth-domain-config-required') {
-      throw new Error('Authentication domain configuration is required.');
     } else if (errorCode === 'auth/unauthorized-domain') {
       throw new Error('This domain is not authorized for OAuth operations.');
     }
 
-    // Generic error fallback
     throw new Error(errorMessage || 'Failed to sign in with Google. Please try again.');
   }
 }
@@ -203,6 +211,26 @@ async function loginToBackend(idToken: string): Promise<AuthUser> {
     return currentUser;
   } catch (error: any) {
     throw new Error(error.response?.data?.detail || 'Failed to login to backend');
+  }
+}
+
+/**
+ * Get user profile from backend (includes role)
+ */
+export async function getUserProfile(): Promise<{ uid: string; email: string; name: string | null; role: string | null }> {
+  try {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      throw new Error('No auth token');
+    }
+
+    const response = await api.get('/users/profile', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    return response.data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.detail || 'Failed to get user profile');
   }
 }
 
@@ -245,30 +273,14 @@ export function isAuthenticated(): boolean {
 
 /**
  * Initialize auth state (restore from localStorage)
- * Checks for demo user first, then Firebase auth
+ * Only real Firebase authentication - no demo mode
  */
 export async function initializeAuth(): Promise<AuthUser | null> {
-  // Check for demo user first
-  const demoUser = localStorage.getItem('demo_user');
-  if (demoUser) {
-    try {
-      const parsed = JSON.parse(demoUser);
-      currentUser = parsed;
-      authToken = localStorage.getItem('auth_token') || 'demo-token';
-      api.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
-      api.defaults.headers.common['X-Demo-Mode'] = 'true';
-      return currentUser;
-    } catch {
-      // Invalid demo user, clear it
-      localStorage.removeItem('demo_user');
-    }
-  }
-
-  // Check localStorage for regular auth
+  // Check localStorage for auth
   const storedToken = localStorage.getItem('auth_token');
   const storedUser = localStorage.getItem('auth_user');
 
-  if (storedToken && storedUser && !storedToken.startsWith('demo-')) {
+  if (storedToken && storedUser) {
     try {
       // Verify token is still valid
       const response = await api.get('/auth/verify', {
@@ -316,70 +328,3 @@ export function requireAuth(): AuthUser {
   }
   return currentUser;
 }
-
-/**
- * Check if running in demo mode
- */
-export function isDemoMode(): boolean {
-  if (typeof window === 'undefined') return false;
-  const demoUser = localStorage.getItem('demo_user');
-  return demoUser !== null;
-}
-
-/**
- * Login with demo mode (bypasses Firebase authentication)
- * Creates a mock user session for exploring the platform
- */
-export async function loginWithDemo(role: 'department' | 'institution' = 'institution'): Promise<AuthUser> {
-  const demoUser: AuthUser = {
-    uid: 'demo-user-' + Date.now(),
-    email: 'demo@smartapproval.ai',
-    name: 'Demo User',
-    picture: null,
-    role: role,
-  };
-
-  currentUser = demoUser;
-  authToken = 'demo-token-' + Date.now();
-
-  // Store demo session
-  localStorage.setItem('demo_user', JSON.stringify(demoUser));
-  localStorage.setItem('auth_user', JSON.stringify(demoUser));
-  localStorage.setItem('auth_token', authToken);
-
-  // Set a mock auth header (backend will need to handle demo tokens)
-  api.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
-  api.defaults.headers.common['X-Demo-Mode'] = 'true';
-
-  return demoUser;
-}
-
-/**
- * Check if current session is demo mode
- */
-export function getDemoUser(): AuthUser | null {
-  if (typeof window === 'undefined') return null;
-  const stored = localStorage.getItem('demo_user');
-  if (stored) {
-    try {
-      return JSON.parse(stored);
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-/**
- * Exit demo mode
- */
-export function exitDemoMode(): void {
-  localStorage.removeItem('demo_user');
-  localStorage.removeItem('auth_user');
-  localStorage.removeItem('auth_token');
-  currentUser = null;
-  authToken = null;
-  delete api.defaults.headers.common['Authorization'];
-  delete api.defaults.headers.common['X-Demo-Mode'];
-}
-

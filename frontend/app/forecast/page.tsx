@@ -41,7 +41,7 @@ function ForecastPageContent() {
 
     const fetchForecast = async () => {
         if (!batchId || !selectedKpi) return;
-        
+
         setLoading(true);
         try {
             const data = await dashboardApi.getForecast(batchId, selectedKpi);
@@ -227,7 +227,7 @@ function ForecastPageContent() {
 
 export default function ForecastPage() {
     return (
-        <ProtectedRoute requiredRole="institution">
+        <ProtectedRoute>
             <Suspense fallback={
                 <div className="min-h-screen bg-gradient-soft flex items-center justify-center">
                     <RefreshCw className="w-8 h-8 text-primary animate-spin" />

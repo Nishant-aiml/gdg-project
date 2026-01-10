@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, Suspense } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { signUpWithEmail, signInWithGoogle } from '@/lib/auth';
+import { signUpWithEmail, signInWithGoogle, handleGoogleRedirectResult } from '@/lib/auth';
 import toast from 'react-hot-toast';
 import { Mail, Lock, UserPlus, User, ArrowRight, Building2, Users } from 'lucide-react';
 import Link from 'next/link';
@@ -16,8 +16,31 @@ function SignUpPageContent() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [role, setRole] = useState<'department' | 'institution'>('department');
+  const [role, setRole] = useState<'department' | 'college'>('department');
   const [loading, setLoading] = useState(false);
+
+  // Helper to get role-specific dashboard
+  const getRoleDashboard = (userRole: string) => {
+    if (userRole === 'college') return '/'; // College users go to main dashboard
+    if (userRole === 'department') return '/nba-dashboard'; // Department users go to NBA dashboard
+    return '/dashboard'; // Fallback
+  };
+
+  // Handle Google redirect result on page load
+  useEffect(() => {
+    const handleRedirect = async () => {
+      try {
+        const user = await handleGoogleRedirectResult();
+        if (user) {
+          toast.success('Account created successfully!');
+          router.push(getRoleDashboard(user.role));
+        }
+      } catch (error: any) {
+        toast.error(error.message || 'Google sign up failed');
+      }
+    };
+    handleRedirect();
+  }, [router]);
 
   const handleEmailSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,7 +62,7 @@ function SignUpPageContent() {
     try {
       await signUpWithEmail(email, password, name, role);
       toast.success('Account created successfully!');
-      router.push(redirect);
+      router.push(getRoleDashboard(role)); // Redirect to role-specific dashboard
     } catch (error: any) {
       toast.error(error.message || 'Sign up failed');
     } finally {
@@ -51,12 +74,11 @@ function SignUpPageContent() {
     setLoading(true);
 
     try {
+      // This triggers a redirect - page will reload after Google auth
       await signInWithGoogle(role);
-      toast.success('Account created successfully!');
-      router.push(redirect);
+      // Note: We won't reach this point as the page redirects
     } catch (error: any) {
       toast.error(error.message || 'Google sign up failed');
-    } finally {
       setLoading(false);
     }
   };
@@ -153,8 +175,8 @@ function SignUpPageContent() {
                 type="button"
                 onClick={() => setRole('department')}
                 className={`p-4 border-2 rounded-xl transition-all flex flex-col items-center gap-2 ${role === 'department'
-                    ? 'border-primary bg-primary-50 text-primary'
-                    : 'border-gray-200 bg-white text-gray-700 hover:border-primary/50'
+                  ? 'border-primary bg-primary-50 text-primary'
+                  : 'border-gray-200 bg-white text-gray-700 hover:border-primary/50'
                   }`}
               >
                 <Users className="w-6 h-6" />
@@ -163,14 +185,14 @@ function SignUpPageContent() {
               </button>
               <button
                 type="button"
-                onClick={() => setRole('institution')}
-                className={`p-4 border-2 rounded-xl transition-all flex flex-col items-center gap-2 ${role === 'institution'
-                    ? 'border-primary bg-primary-50 text-primary'
-                    : 'border-gray-200 bg-white text-gray-700 hover:border-primary/50'
+                onClick={() => setRole('college')}
+                className={`p-4 border-2 rounded-xl transition-all flex flex-col items-center gap-2 ${role === 'college'
+                  ? 'border-primary bg-primary-50 text-primary'
+                  : 'border-gray-200 bg-white text-gray-700 hover:border-primary/50'
                   }`}
               >
                 <Building2 className="w-6 h-6" />
-                <span className="font-medium">Institution</span>
+                <span className="font-medium">College</span>
                 <span className="text-xs text-gray-500">All departments access</span>
               </button>
             </div>

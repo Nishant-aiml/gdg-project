@@ -70,6 +70,13 @@ function DashboardPageContent() {
           return;
         }
 
+        // MODE-BASED ROUTING: NBA mode goes to dedicated NBA dashboard
+        if (batch.mode === 'nba') {
+          window.location.href = `/nba-dashboard?batch_id=${batchId}`;
+          return;
+        }
+
+        // AICTE mode continues with this dashboard
         setDashboard(data);
       } catch (err) {
         const error = err as { response?: { data?: { detail?: string } } };
@@ -665,7 +672,7 @@ function DashboardPageContent() {
 
 export default function DashboardPage() {
   return (
-    <ProtectedRoute requiredRole="institution">
+    <ProtectedRoute>
       <Suspense fallback={
         <div className="min-h-screen bg-gradient-soft flex items-center justify-center">
           <div className="text-center">

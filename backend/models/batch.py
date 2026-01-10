@@ -8,10 +8,10 @@ from datetime import datetime
 from enum import Enum
 
 class ReviewerMode(str, Enum):
+    """Supported accreditation modes - AICTE and NBA only"""
     AICTE = "aicte"
     NBA = "nba"
-    NAAC = "naac"
-    NIRF = "nirf"
+    # NAAC and NIRF removed - platform supports only AICTE and NBA
 
 class BatchStatus(str, Enum):
     CREATED = "created"
@@ -29,7 +29,7 @@ class BatchStatus(str, Enum):
 # This is just for API schemas - actual storage is in SQLite
 class Batch(BaseModel):
     batch_id: str = Field(..., description="Unique batch identifier")
-    mode: ReviewerMode = Field(..., description="Accreditation mode: AICTE, NBA, NAAC, or NIRF")
+    mode: ReviewerMode = Field(..., description="Accreditation mode: AICTE or NBA only")
     status: BatchStatus = Field(default=BatchStatus.CREATED)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

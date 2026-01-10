@@ -27,56 +27,16 @@ export default function BatchesPage() {
     useEffect(() => {
         const fetchBatches = async () => {
             try {
-                // Check if in demo mode
-                const isDemoMode = localStorage.getItem('demo_user') !== null;
-
-                if (isDemoMode) {
-                    // Show sample demo batches
-                    setBatches([
-                        {
-                            id: 'demo-batch-aicte-2024',
-                            mode: 'AICTE',
-                            status: 'completed',
-                            created_at: new Date().toISOString(),
-                            document_count: 5,
-                            overall_score: 78.5
-                        },
-                        {
-                            id: 'demo-batch-ugc-2024',
-                            mode: 'UGC',
-                            status: 'completed',
-                            created_at: new Date(Date.now() - 86400000).toISOString(),
-                            document_count: 3,
-                            overall_score: 82.3
-                        },
-                        {
-                            id: 'demo-batch-mixed-2024',
-                            mode: 'Mixed',
-                            status: 'processing',
-                            created_at: new Date(Date.now() - 3600000).toISOString(),
-                            document_count: 8
-                        },
-                        {
-                            id: 'demo-batch-old',
-                            mode: 'AICTE',
-                            status: 'completed',
-                            created_at: new Date(Date.now() - 604800000).toISOString(),
-                            document_count: 4,
-                            overall_score: 65.2
-                        }
-                    ]);
-                } else {
-                    // Fetch real batches from API
-                    const baseUrl = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000/api';
-                    const response = await fetch(`${baseUrl}/batches/list`, {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
-                        }
-                    });
-                    if (response.ok) {
-                        const data = await response.json();
-                        setBatches(data.batches || []);
+                // Fetch only real batches from API - no demo mode
+                const baseUrl = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000/api';
+                const response = await fetch(`${baseUrl}/batches/list`, {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
                     }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    setBatches(data.batches || []);
                 }
             } catch (error) {
                 console.error('Failed to fetch batches:', error);

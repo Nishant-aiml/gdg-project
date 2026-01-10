@@ -28,6 +28,7 @@ from routers import (
     analytics,
     auth,
     gov_documents,
+    users,
 )
 from routers import kpi_details
 from routers import nba
@@ -104,6 +105,7 @@ app.mount("/reports", StaticFiles(directory="storage/reports"), name="reports")
 
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(batches.router, prefix="/api/batches", tags=["Batches"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(processing.router, prefix="/api/processing", tags=["Processing"])

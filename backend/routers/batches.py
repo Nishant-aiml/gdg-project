@@ -154,46 +154,12 @@ def list_batches(
     List all batches.
     
     By default, only returns batches with processed_documents > 0 (evidence-driven).
+    Only real batches - no demo mode.
     
     Optional filter parameter:
     - filter=all: Return all batches including empty ones
     - filter=valid: Only return completed batches with at least 1 document
     """
-    # DEMO MODE: Return demo batches for demo users
-    if user and user.get("is_demo"):
-        return [
-            BatchResponse(
-                batch_id="demo-batch-aicte-2024",
-                mode="aicte",
-                status="completed",
-                created_at="2024-12-01T10:00:00",
-                updated_at="2024-12-01T12:00:00",
-                total_documents=5,
-                processed_documents=5,
-                institution_name="Indian Institute of Technology Delhi"
-            ),
-            BatchResponse(
-                batch_id="demo-batch-ugc-2024",
-                mode="ugc",
-                status="completed",
-                created_at="2024-11-15T09:00:00",
-                updated_at="2024-11-15T11:30:00",
-                total_documents=4,
-                processed_documents=4,
-                institution_name="Delhi University - North Campus"
-            ),
-            BatchResponse(
-                batch_id="demo-batch-mixed-2024",
-                mode="mixed",
-                status="completed",
-                created_at="2024-10-20T14:00:00",
-                updated_at="2024-10-20T16:45:00",
-                total_documents=6,
-                processed_documents=6,
-                institution_name="National Institute of Technology Karnataka"
-            ),
-        ]
-    
     db = get_db()
     
     try:
@@ -260,46 +226,8 @@ def get_batch(
 ):
     """
     Get a specific batch by ID.
-    Supports demo batches for demo mode users.
+    Only real batches - no demo mode.
     """
-    # DEMO MODE: Return demo batch info for demo batch IDs
-    if batch_id.startswith("demo-"):
-        demo_batches = {
-            "demo-batch-aicte-2024": BatchResponse(
-                batch_id="demo-batch-aicte-2024",
-                mode="aicte",
-                status="completed",
-                created_at="2024-12-01T10:00:00",
-                updated_at="2024-12-01T12:00:00",
-                total_documents=5,
-                processed_documents=5,
-                institution_name="Indian Institute of Technology Delhi"
-            ),
-            "demo-batch-ugc-2024": BatchResponse(
-                batch_id="demo-batch-ugc-2024",
-                mode="ugc",
-                status="completed",
-                created_at="2024-11-15T09:00:00",
-                updated_at="2024-11-15T11:30:00",
-                total_documents=4,
-                processed_documents=4,
-                institution_name="Delhi University - North Campus"
-            ),
-            "demo-batch-mixed-2024": BatchResponse(
-                batch_id="demo-batch-mixed-2024",
-                mode="mixed",
-                status="completed",
-                created_at="2024-10-20T14:00:00",
-                updated_at="2024-10-20T16:45:00",
-                total_documents=6,
-                processed_documents=6,
-                institution_name="National Institute of Technology Karnataka"
-            ),
-        }
-        if batch_id in demo_batches:
-            return demo_batches[batch_id]
-        raise HTTPException(status_code=404, detail="Demo batch not found")
-    
     db = get_db()
     
     try:

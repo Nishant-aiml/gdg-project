@@ -8,6 +8,21 @@ const nextConfig = {
 
   poweredByHeader: false,
 
+  // Fix Cross-Origin-Opener-Policy for Firebase popup auth
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'Cross-Origin-Opener-Policy',
+            value: 'same-origin-allow-popups',
+          },
+        ],
+      },
+    ];
+  },
+
   images: {
     unoptimized: true,
   },

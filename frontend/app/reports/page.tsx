@@ -22,43 +22,17 @@ export default function ReportsPage() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // For demo mode, show sample reports
+        // Fetch only real reports from API - no demo mode
         const fetchReports = async () => {
             try {
-                // Check if in demo mode
-                const isDemoMode = localStorage.getItem('demo_user') !== null;
-
-                if (isDemoMode) {
-                    // Show sample demo reports with correct batch IDs
-                    setReports([
-                        {
-                            id: 'demo-report-1',
-                            batch_id: 'demo-batch-aicte-2024',
-                            created_at: new Date().toISOString(),
-                            report_type: 'standard',
-                            download_url: '/api/reports/demo/download',
-                            mode: 'AICTE'
-                        },
-                        {
-                            id: 'demo-report-2',
-                            batch_id: 'demo-batch-ugc-2024',
-                            created_at: new Date(Date.now() - 86400000).toISOString(),
-                            report_type: 'detailed',
-                            download_url: '/api/reports/demo/download',
-                            mode: 'UGC'
-                        }
-                    ]);
-                } else {
-                    // Fetch real reports from API
-                    const response = await fetch('/api/reports/list', {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
-                        }
-                    });
-                    if (response.ok) {
-                        const data = await response.json();
-                        setReports(data.reports || []);
+                const response = await fetch('/api/reports/list', {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
                     }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    setReports(data.reports || []);
                 }
             } catch (error) {
                 console.error('Failed to fetch reports:', error);
