@@ -37,21 +37,21 @@ function LoginPageContent() {
     try {
       const profile = await getUserProfile();
       if (!profile.role) {
-        // No role set - redirect to role selection
-        router.push(`/select-role?redirect=${encodeURIComponent(redirect)}`);
+        // No role set - redirect to role selection (hard redirect)
+        window.location.href = `/select-role?redirect=${encodeURIComponent(redirect)}`;
       } else {
-        // Has role - redirect to role-specific dashboard
+        // Has role - redirect to role-specific dashboard (hard redirect)
         if (profile.role === 'college') {
-          router.push('/'); // College users go to main dashboard
+          window.location.href = '/'; // College users go to main dashboard
         } else if (profile.role === 'department') {
-          router.push('/nba-dashboard'); // Department users go to NBA dashboard
+          window.location.href = '/nba-dashboard'; // Department users go to NBA dashboard
         } else {
-          router.push(redirect); // Fallback to original redirect
+          window.location.href = redirect; // Fallback to original redirect
         }
       }
     } catch (error) {
       // If profile check fails, still redirect to dashboard (will be caught by protected route)
-      router.push(redirect);
+      window.location.href = redirect;
     }
   };
 
