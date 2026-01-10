@@ -4,15 +4,15 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { batchApi } from '@/lib/api';
 import toast from 'react-hot-toast';
-import { FileText, GraduationCap, Sparkles, Shield, BarChart3, CheckCircle, Layers, Award, BookOpen, TrendingUp } from 'lucide-react';
+import { FileText, GraduationCap, Sparkles, Shield, BarChart3, CheckCircle, Layers, Award } from 'lucide-react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
 export default function HomePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [selectedMode, setSelectedMode] = useState<'aicte' | 'nba' | 'naac' | 'nirf' | null>(null);
+  const [selectedMode, setSelectedMode] = useState<'aicte' | 'nba' | null>(null);
 
-  const handleModeSelect = async (mode: 'aicte' | 'nba' | 'naac' | 'nirf') => {
+  const handleModeSelect = async (mode: 'aicte' | 'nba') => {
     setLoading(true);
     setSelectedMode(mode);
     try {
@@ -61,26 +61,6 @@ export default function HomePage() {
       tag: 'Accreditation',
       blocks: 8,
       features: ['PEOs/PSOs', 'Faculty Quality', 'Student Performance', '+5 more']
-    },
-    {
-      id: 'naac' as const,
-      name: 'NAAC Mode',
-      description: 'National Assessment and Accreditation Council evaluation',
-      icon: BookOpen,
-      color: 'accent',
-      tag: 'Assessment',
-      blocks: 7,
-      features: ['Criterion 1-7', 'IQAC', 'Research', '+4 more']
-    },
-    {
-      id: 'nirf' as const,
-      name: 'NIRF Mode',
-      description: 'National Institutional Ranking Framework evaluation',
-      icon: TrendingUp,
-      color: 'purple',
-      tag: 'Ranking',
-      blocks: 6,
-      features: ['TLR', 'RP', 'GO', 'OI', 'PR', '+1 more']
     }
   ];
 
@@ -129,11 +109,11 @@ export default function HomePage() {
             ))}
           </div>
 
-          {/* Mode Selection Cards - 4 Column Grid */}
-          <div className="max-w-7xl mx-auto grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Mode Selection Cards - 2 Column Grid */}
+          <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-6">
             {modes.map((mode) => {
               const Icon = mode.icon;
-              const colorClasses = {
+              const colorClasses: Record<string, { bg: string; text: string; tag: string; card: string; number: string; dot: string }> = {
                 primary: {
                   bg: 'from-primary-50 to-primary-100',
                   text: 'text-primary',
@@ -149,22 +129,6 @@ export default function HomePage() {
                   card: 'bg-secondary-50/50',
                   number: 'bg-secondary',
                   dot: 'bg-secondary'
-                },
-                accent: {
-                  bg: 'from-accent-50 to-orange-100',
-                  text: 'text-accent',
-                  tag: 'bg-accent-50 text-accent',
-                  card: 'bg-accent-50/50',
-                  number: 'bg-accent',
-                  dot: 'bg-accent'
-                },
-                purple: {
-                  bg: 'from-purple-50 to-purple-100',
-                  text: 'text-purple-500',
-                  tag: 'bg-purple-50 text-purple-600',
-                  card: 'bg-purple-50/50',
-                  number: 'bg-purple-500',
-                  dot: 'bg-purple-500'
                 }
               };
               const colors = colorClasses[mode.color];
