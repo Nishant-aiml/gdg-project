@@ -2,9 +2,14 @@
 Application configuration settings
 """
 
+import os
 from pydantic_settings import BaseSettings
 from typing import Optional
 from pathlib import Path
+
+# DEBUG: Print env vars at module load time
+print(f"[DEBUG] OPENAI_API_KEY in os.environ: {'OPENAI_API_KEY' in os.environ}")
+print(f"[DEBUG] OPENAI_API_KEY value exists: {bool(os.environ.get('OPENAI_API_KEY'))}")
 
 class Settings(BaseSettings):
     # MongoDB (supports both MONGODB_URL and MONGODB_URI)
@@ -13,16 +18,17 @@ class Settings(BaseSettings):
     MONGODB_DB_NAME: str = "smart_approval_ai"
     
     # Google Gemini (PRIMARY - Free Tier)
-    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = os.environ.get("GEMINI_API_KEY")
     GEMINI_MODEL: str = "gemini-2.5-flash"  # Primary AI model - Gemini 2.5 Flash (free tier, fast)
     
     # OpenAI (Fallback when Gemini unavailable)
-    OPENAI_API_KEY: Optional[str] = None
+    # CRITICAL: Use os.environ.get as default to ensure Railway env vars are read
+    OPENAI_API_KEY: Optional[str] = os.environ.get("OPENAI_API_KEY")
     OPENAI_MODEL_PRIMARY: str = "gpt-5-nano"  # Fallback model - GPT-5 Nano (fast, lightweight)
     OPENAI_MODEL_FALLBACK: str = "gpt-5-mini"  # Last resort fallback - GPT-5 Mini
     
     # Firebase
-    FIREBASE_PROJECT_ID: Optional[str] = None  # Firebase Project ID for token verification
+    FIREBASE_PROJECT_ID: Optional[str] = os.environ.get("FIREBASE_PROJECT_ID")
     FIREBASE_STORAGE_BUCKET: Optional[str] = None  # Firebase Storage bucket name
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None  # Path to service account JSON
     
@@ -50,44 +56,17 @@ class Settings(BaseSettings):
     API_TOKEN: Optional[str] = None
     
     class Config:
-        # Look for .env in multiple locations
-        # Railway/Docker: current directory or /app
-        # Local dev: project root (parent of backend)
-        import os
-        env_paths = [
-            Path(__file__).parent.parent.parent / ".env",  # Project root
-            Path(__file__).parent.parent / ".env",  # Backend directory
-            Path(".env"),  # Current directory
-        ]
-        for p in env_paths:
-            if p.exists():
-                env_file = str(p)
-                break
-        else:
-            env_file = None  # No .env file found - rely on OS environment
-        
+        # Try to find .env file, but don't require it
+        env_file = ".env" if Path(".env").exists() else None
         env_file_encoding = "utf-8"
         case_sensitive = True
-        extra = "ignore"  # Ignore extra fields from .env that aren't in the model
+        extra = "ignore"
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        # CRITICAL: Explicit fallback to os.environ for Railway deployment
-        # pydantic-settings may not read env vars correctly when no .env file exists
-        import os
-        
-        # OpenAI API Key - required for AI features
-        if not self.OPENAI_API_KEY:
-            self.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-        
-        # Gemini API Key
-        if not self.GEMINI_API_KEY:
-            self.GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-        
-        # Firebase settings
-        if not self.FIREBASE_PROJECT_ID:
-            self.FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID")
+        # Debug output
+        print(f"[DEBUG] After Settings init, OPENAI_API_KEY is set: {bool(self.OPENAI_API_KEY)}")
         
         # Use MONGODB_URI if MONGODB_URL is not set
         if not self.MONGODB_URL and self.MONGODB_URI:
@@ -96,4 +75,6 @@ class Settings(BaseSettings):
             self.MONGODB_URL = "mongodb://localhost:27017/"
 
 settings = Settings()
+print(f"[DEBUG] Final settings.OPENAI_API_KEY is set: {bool(settings.OPENAI_API_KEY)}")
+
 
