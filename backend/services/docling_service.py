@@ -1,6 +1,7 @@
 """
-Docling Document Parsing Service
-Primary extraction engine - replaces Unstructured-IO
+Fast Document Parsing Service
+Uses PyMuPDF (fitz) + pdfplumber for fast, efficient extraction
+Replaces heavy Docling dependency for Railway deployment
 """
 
 import logging
@@ -11,45 +12,32 @@ import json
 
 logger = logging.getLogger(__name__)
 
+# Try importing fast extraction libraries
 try:
-    from docling.document_converter import DocumentConverter
-    from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
-    DOCLING_AVAILABLE = True
+    import fitz  # PyMuPDF
+    PYMUPDF_AVAILABLE = True
 except ImportError:
-    DOCLING_AVAILABLE = False
-    logger.warning("Docling not installed. Please install with: pip install docling")
+    PYMUPDF_AVAILABLE = False
+    logger.warning("PyMuPDF not installed. pip install PyMuPDF")
+
+try:
+    import pdfplumber
+    PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    PDFPLUMBER_AVAILABLE = False
+    logger.warning("pdfplumber not installed. pip install pdfplumber")
+
 
 class DoclingService:
-    """Docling-based document parsing service with fallback"""
+    """Fast document parsing service using PyMuPDF + pdfplumber"""
     
     def __init__(self):
-        self.docling_available = DOCLING_AVAILABLE
-        
-        if not DOCLING_AVAILABLE:
-            logger.warning("Docling not available. Will use fallback extraction methods.")
-            self.converter = None
-        else:
-            try:
-                # Initialize DocumentConverter with optimized settings
-                pipeline_options = PdfPipelineOptions()
-                pipeline_options.do_ocr = False  # We'll use PaddleOCR as fallback
-                pipeline_options.do_table_structure = True
-                pipeline_options.table_structure_options.do_cell_matching = True
-                
-                self.converter = DocumentConverter(
-                    format=InputFormat.PDF,
-                    pipeline_options=pipeline_options
-                )
-                logger.info("Docling initialized successfully")
-            except Exception as e:
-                logger.warning(f"Failed to initialize Docling: {e}. Will use fallback.")
-                self.docling_available = False
-                self.converter = None
+        self.docling_available = PYMUPDF_AVAILABLE  # For compatibility
+        logger.info(f"DoclingService initialized (PyMuPDF: {PYMUPDF_AVAILABLE}, pdfplumber: {PDFPLUMBER_AVAILABLE})")
     
     def parse_pdf_to_structured_text(self, filepath: str) -> Dict[str, Any]:
         """
-        Parse PDF to structured text using Docling (with fallback)
+        Parse PDF to structured text using PyMuPDF (fast!) with pdfplumber for tables
         Returns: {
             full_text: str,
             section_chunks: List[Dict],
@@ -57,130 +45,70 @@ class DoclingService:
             sections: List[Dict]
         }
         """
-        # Fallback if Docling not available
-        if not self.docling_available or not self.converter:
+        if PYMUPDF_AVAILABLE:
+            return self._pymupdf_extraction(filepath)
+        else:
             return self._fallback_extraction(filepath)
-        
+    
+    def _pymupdf_extraction(self, filepath: str) -> Dict[str, Any]:
+        """Ultra-fast extraction using PyMuPDF"""
         try:
-            # Basic corrupted-PDF validation using pypdf
-            try:
-                import pypdf
-                with open(filepath, "rb") as f:
-                    pypdf.PdfReader(f)  # Will raise on severely corrupted PDFs
-            except Exception as pdf_err:
-                logger.error(f"Invalid or corrupted PDF file: {pdf_err}")
-                return {
-                    "full_text": "",
-                    "section_chunks": [],
-                    "tables_text": "",
-                    "sections": [],
-                    "page_count": 0,
-                    "has_text": False,
-                    "error": "Invalid or corrupted PDF file"
-                }
-
-            # PERFORMANCE: Convert document with timeout protection (30s max) and retry logic
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-            from utils.parsing_retry import retry_parsing_with_timeout
-            
-            @retry_parsing_with_timeout(timeout_seconds=30.0, max_retries=1)
-            def run_docling_with_retry():
-                return self.converter.convert(filepath)
-            
-            try:
-                result = run_docling_with_retry()
-            except (FuturesTimeoutError, TimeoutError):
-                logger.warning(f"⏱️ Docling parsing timed out after 30s for {filepath}, using fallback...")
-                return self._fallback_extraction(filepath)
-            except Exception as docling_err:
-                logger.warning(f"Docling conversion failed after retries: {docling_err}, using fallback...")
-                return self._fallback_extraction(filepath)
-            
-            doc = result.document
-            
-            # Extract full text
+            doc = fitz.open(filepath)
             full_text_parts = []
-            section_chunks = []
-            tables_text_parts = []
             sections = []
-            
-            # Process document structure
             current_section = None
-            current_page = 1
             
-            for item in doc.items:
-                # Extract text from different item types
-                if hasattr(item, 'text'):
-                    text = item.text
-                    if text and text.strip():
-                        full_text_parts.append(text.strip())
-                        
-                        # Track sections
-                        if hasattr(item, 'level') and item.level:
-                            # This is a heading
-                            section_name = text.strip()
-                            current_section = {
-                                "title": section_name,
-                                "level": item.level,
-                                "page": current_page,
-                                "content": []
-                            }
-                            sections.append(current_section)
-                        elif current_section:
-                            current_section["content"].append(text.strip())
-                        else:
-                            # No section, create default
-                            if not sections:
-                                current_section = {
-                                    "title": "Introduction",
-                                    "level": 1,
-                                    "page": current_page,
-                                    "content": []
-                                }
-                                sections.append(current_section)
-                            current_section["content"].append(text.strip())
+            for page_num in range(len(doc)):
+                page = doc[page_num]
                 
-                # Extract tables
-                if hasattr(item, 'table') and item.table:
-                    table_text = self._table_to_text(item.table)
-                    tables_text_parts.append(table_text)
-                    full_text_parts.append(f"\n[TABLE]\n{table_text}\n[/TABLE]\n")
-                
-                # Track page numbers
-                if hasattr(item, 'page') and item.page:
-                    current_page = item.page
+                # Extract text with layout preservation
+                text = page.get_text("text")
+                if text and text.strip():
+                    full_text_parts.append(f"[Page {page_num + 1}]\n{text}")
+                    
+                    # Simple section detection based on font size/bold
+                    blocks = page.get_text("dict")["blocks"]
+                    for block in blocks:
+                        if "lines" in block:
+                            for line in block["lines"]:
+                                for span in line["spans"]:
+                                    # Detect headers by font size > 12 or bold
+                                    if span["size"] > 12 or "bold" in span["font"].lower():
+                                        section_title = span["text"].strip()
+                                        if section_title and len(section_title) > 3:
+                                            if current_section:
+                                                sections.append(current_section)
+                                            current_section = {
+                                                "title": section_title,
+                                                "level": 1 if span["size"] > 14 else 2,
+                                                "page": page_num + 1,
+                                                "content": []
+                                            }
+                                    elif current_section and span["text"].strip():
+                                        current_section["content"].append(span["text"].strip())
             
-            # Combine all text
+            if current_section:
+                sections.append(current_section)
+            
+            doc.close()
+            
+            # Extract tables using pdfplumber (more accurate for tables)
+            tables_text = ""
+            if PDFPLUMBER_AVAILABLE:
+                tables_text = self._extract_tables_pdfplumber(filepath)
+            
             full_text = "\n\n".join(full_text_parts)
-            tables_text = "\n\n".join(tables_text_parts)
-
-            # Debug: log Docling extraction stats
-            logger.info(f"DOC LING FULL TEXT LENGTH: {len(full_text)}")
-            logger.info(f"DOC LING SECTIONS COUNT: {len(sections)}")
-            logger.info(f"DOC LING TABLE TEXT LENGTH: {len(tables_text)}")
-
-            # Debug: write to disk per-file in storage/debug
-            try:
-                debug_dir = Path("storage") / "debug"
-                debug_dir.mkdir(parents=True, exist_ok=True)
-                stem = Path(filepath).stem
-
-                full_path = debug_dir / f"{stem}_full_text_docling.txt"
-                sections_path = debug_dir / f"{stem}_sections_docling.json"
-                tables_path = debug_dir / f"{stem}_tables_docling.txt"
-
-                with open(full_path, "w", encoding="utf-8") as f_full:
-                    f_full.write(full_text)
-                with open(sections_path, "w", encoding="utf-8") as f_sec:
-                    json.dump(sections, f_sec, ensure_ascii=False, indent=2)
-                with open(tables_path, "w", encoding="utf-8") as f_tab:
-                    f_tab.write(tables_text)
-            except Exception as debug_err:
-                logger.warning(f"Failed to write Docling debug files: {debug_err}")
+            
+            # Add tables to full text
+            if tables_text:
+                full_text += f"\n\n[TABLES]\n{tables_text}\n[/TABLES]"
+            
+            logger.info(f"PyMuPDF extraction: {len(full_text)} chars, {len(sections)} sections")
             
             # Create section chunks
+            section_chunks = []
             for section in sections:
-                section_text = "\n".join(section["content"])
+                section_text = " ".join(section.get("content", []))
                 section_chunks.append({
                     "title": section["title"],
                     "level": section["level"],
@@ -193,101 +121,61 @@ class DoclingService:
                 "section_chunks": section_chunks,
                 "tables_text": tables_text,
                 "sections": sections,
-                "page_count": current_page,
+                "page_count": len(full_text_parts),
                 "has_text": len(full_text.strip()) > 0
             }
             
         except Exception as e:
-            logger.error(f"Docling parsing error: {e}")
-            return {
-                "full_text": "",
-                "section_chunks": [],
-                "tables_text": "",
-                "sections": [],
-                "page_count": 0,
-                "has_text": False,
-                "error": str(e)
-            }
+            logger.error(f"PyMuPDF extraction error: {e}")
+            return self._fallback_extraction(filepath)
     
-    def extract_tables(self, filepath: str) -> List[Dict[str, Any]]:
-        """
-        Extract tables from PDF using Docling
-        Returns: List of table dictionaries
-        """
+    def _extract_tables_pdfplumber(self, filepath: str) -> str:
+        """Extract tables using pdfplumber (more accurate than PyMuPDF for tables)"""
         try:
-            result = self.converter.convert(filepath)
-            doc = result.document
+            tables_text_parts = []
+            with pdfplumber.open(filepath) as pdf:
+                for page_num, page in enumerate(pdf.pages):
+                    tables = page.extract_tables()
+                    for table_idx, table in enumerate(tables):
+                        if table:
+                            table_text = f"[Table Page {page_num + 1}]\n"
+                            for row in table:
+                                row_text = " | ".join([str(cell or "") for cell in row])
+                                table_text += row_text + "\n"
+                            tables_text_parts.append(table_text)
             
-            tables = []
-            for item in doc.items:
-                if hasattr(item, 'table') and item.table:
-                    table_data = self._table_to_dict(item.table)
-                    tables.append(table_data)
-            
-            return tables
-            
+            return "\n".join(tables_text_parts)
         except Exception as e:
-            logger.error(f"Table extraction error: {e}")
-            return []
-    
-    def extract_sections(self, filepath: str) -> List[Dict[str, Any]]:
-        """
-        Extract document sections with headers
-        Returns: List of section dictionaries
-        """
-        try:
-            result = self.parse_pdf_to_structured_text(filepath)
-            return result.get("sections", [])
-            
-        except Exception as e:
-            logger.error(f"Section extraction error: {e}")
-            return []
-    
-    def _table_to_text(self, table) -> str:
-        """Convert Docling table to text format"""
-        try:
-            rows = []
-            if hasattr(table, 'rows'):
-                for row in table.rows:
-                    cells = []
-                    if hasattr(row, 'cells'):
-                        for cell in row.cells:
-                            if hasattr(cell, 'text'):
-                                cells.append(cell.text or "")
-                            else:
-                                cells.append(str(cell))
-                    rows.append(" | ".join(cells))
-            return "\n".join(rows)
-        except Exception as e:
-            logger.warning(f"Table to text conversion error: {e}")
+            logger.warning(f"pdfplumber table extraction error: {e}")
             return ""
     
-    def _table_to_dict(self, table) -> Dict[str, Any]:
-        """Convert Docling table to dictionary"""
-        try:
-            rows = []
-            if hasattr(table, 'rows'):
-                for row in table.rows:
-                    cells = []
-                    if hasattr(row, 'cells'):
-                        for cell in row.cells:
-                            if hasattr(cell, 'text'):
-                                cells.append(cell.text or "")
-                            else:
-                                cells.append(str(cell))
-                    rows.append(cells)
-            
-            return {
-                "rows": rows,
-                "row_count": len(rows),
-                "column_count": len(rows[0]) if rows else 0
-            }
-        except Exception as e:
-            logger.warning(f"Table to dict conversion error: {e}")
-            return {"rows": [], "row_count": 0, "column_count": 0}
+    def extract_tables(self, filepath: str) -> List[Dict[str, Any]]:
+        """Extract tables from PDF"""
+        tables = []
+        if PDFPLUMBER_AVAILABLE:
+            try:
+                with pdfplumber.open(filepath) as pdf:
+                    for page_num, page in enumerate(pdf.pages):
+                        page_tables = page.extract_tables()
+                        for table in page_tables:
+                            if table:
+                                tables.append({
+                                    "rows": table,
+                                    "row_count": len(table),
+                                    "column_count": len(table[0]) if table else 0,
+                                    "page": page_num + 1
+                                })
+            except Exception as e:
+                logger.error(f"Table extraction error: {e}")
+        return tables
+    
+    def extract_sections(self, filepath: str) -> List[Dict[str, Any]]:
+        """Extract document sections with headers"""
+        result = self.parse_pdf_to_structured_text(filepath)
+        return result.get("sections", [])
     
     def _fallback_extraction(self, filepath: str) -> Dict[str, Any]:
-        """Fallback extraction using PyPDF when Docling is not available"""
+        """Fallback extraction using pypdf when PyMuPDF is not available"""
         try:
             import pypdf
             
@@ -303,11 +191,9 @@ class DoclingService:
                         full_text_parts.append(f"[Page {page_num + 1}]\n{text}")
             
             full_text = "\n\n".join(full_text_parts)
-
-            # Debug: log fallback extraction stats
-            logger.info(f"FALLBACK FULL TEXT LENGTH: {len(full_text)} (pypdf)")
+            logger.info(f"Fallback extraction: {len(full_text)} chars")
             
-            result = {
+            return {
                 "full_text": full_text,
                 "section_chunks": [],
                 "tables_text": "",
@@ -315,19 +201,6 @@ class DoclingService:
                 "page_count": num_pages if full_text_parts else 0,
                 "has_text": len(full_text.strip()) > 0
             }
-
-            # Debug: also write fallback text to disk
-            try:
-                debug_dir = Path("storage") / "debug"
-                debug_dir.mkdir(parents=True, exist_ok=True)
-                stem = Path(filepath).stem
-                full_path = debug_dir / f"{stem}_full_text_fallback.txt"
-                with open(full_path, "w", encoding="utf-8") as f_full:
-                    f_full.write(full_text)
-            except Exception as debug_err:
-                logger.warning(f"Failed to write fallback debug files: {debug_err}")
-
-            return result
         except Exception as e:
             logger.error(f"Fallback extraction error: {e}")
             return {
@@ -339,4 +212,7 @@ class DoclingService:
                 "has_text": False,
                 "error": str(e)
             }
-
+    
+    def parse_document(self, filepath: str) -> Dict[str, Any]:
+        """Alias for compatibility with existing code"""
+        return self.parse_pdf_to_structured_text(filepath)
