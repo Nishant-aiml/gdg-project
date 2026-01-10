@@ -23,14 +23,24 @@ function LoginPageContent() {
         const user = await handleGoogleRedirectResult();
         if (user) {
           toast.success('Login successful!');
-          await handleSuccessfulLogin();
+          // Redirect based on role (use hard redirect to refresh auth state)
+          if (!user.role || user.role === 'pending') {
+            window.location.href = `/select-role?redirect=${encodeURIComponent(redirect)}`;
+          } else if (user.role === 'college') {
+            window.location.href = '/';
+          } else if (user.role === 'department') {
+            window.location.href = '/nba-dashboard';
+          } else {
+            window.location.href = redirect;
+          }
         }
       } catch (error: any) {
+        console.error('Google redirect error:', error);
         toast.error(error.message || 'Google login failed');
       }
     };
     handleRedirect();
-  }, []);
+  }, [redirect]);
 
   // Check role and redirect accordingly
   const handleSuccessfulLogin = async () => {

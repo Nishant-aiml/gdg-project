@@ -33,14 +33,16 @@ function SignUpPageContent() {
         const user = await handleGoogleRedirectResult();
         if (user) {
           toast.success('Account created successfully!');
-          router.push(getRoleDashboard(user.role));
+          // Use hard redirect to ensure fresh auth state
+          window.location.href = getRoleDashboard(user.role);
         }
       } catch (error: any) {
+        console.error('Google redirect error:', error);
         toast.error(error.message || 'Google sign up failed');
       }
     };
     handleRedirect();
-  }, [router]);
+  }, []);
 
   const handleEmailSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
