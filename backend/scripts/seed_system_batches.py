@@ -178,11 +178,19 @@ def seed_system_batches():
     db = get_db()
     
     try:
-        # Check if system batches already exist
-        existing_system = db.query(Batch).filter(Batch.data_source == "system").count()
-        if existing_system > 0:
-            logger.info(f"Found {existing_system} existing system batches. Skipping seed.")
-            return
+        # ALWAYS recreate system batches on deploy (delete old ones first)
+        # This ensures fresh data and fixes any corruption from code changes
+        from config.database import Block, ComplianceFlag
+        existing_system = db.query(Batch).filter(Batch.data_source == "system").all()
+        if existing_system:
+            logger.info(f"Deleting {len(existing_system)} existing system batches to recreate with latest schema...")
+            for old_batch in existing_system:
+                # Delete related blocks first
+                db.query(Block).filter(Block.batch_id == old_batch.id).delete()
+                db.query(ComplianceFlag).filter(ComplianceFlag.batch_id == old_batch.id).delete()
+                db.delete(old_batch)
+            db.commit()
+            logger.info("Old system batches deleted. Recreating...")
         
         logger.info("Seeding system batches...")
         
