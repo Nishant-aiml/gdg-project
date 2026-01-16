@@ -262,8 +262,23 @@ Index("idx_department_institution", Department.institution_id)
 
 # Create tables
 def init_db():
-    """Initialize database tables"""
+    """Initialize database tables and run migrations"""
     Base.metadata.create_all(bind=engine)
+    
+    # Run migrations for new columns
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    
+    # Check if data_source column exists in batches table
+    if 'batches' in inspector.get_table_names():
+        columns = [col['name'] for col in inspector.get_columns('batches')]
+        if 'data_source' not in columns:
+            logger.info("Migrating: Adding data_source column to batches table")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE batches ADD COLUMN data_source TEXT DEFAULT 'user'"))
+                conn.commit()
+            logger.info("Migration complete: data_source column added")
+    
     if DB_TYPE == "postgresql":
         logger.info("PostgreSQL database initialized (Supabase)")
     else:

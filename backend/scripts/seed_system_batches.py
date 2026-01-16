@@ -45,7 +45,7 @@ def create_aicte_blocks(batch_id: str, db, kpi_data: dict):
         },
         confidence=0.92,
         is_outdated=0,
-        evidence_doc_id=f"{batch_id}_doc1"
+        source_doc=f"{batch_id}_doc1.pdf"
     )
     db.add(faculty_block)
     
@@ -63,7 +63,7 @@ def create_aicte_blocks(batch_id: str, db, kpi_data: dict):
         },
         confidence=0.89,
         is_outdated=0,
-        evidence_doc_id=f"{batch_id}_doc2"
+        source_doc=f"{batch_id}_doc2.pdf"
     )
     db.add(infra_block)
     
@@ -81,7 +81,7 @@ def create_aicte_blocks(batch_id: str, db, kpi_data: dict):
         },
         confidence=0.95,
         is_outdated=0,
-        evidence_doc_id=f"{batch_id}_doc3"
+        source_doc=f"{batch_id}_doc3.pdf"
     )
     db.add(placement_block)
     
@@ -99,7 +99,7 @@ def create_aicte_blocks(batch_id: str, db, kpi_data: dict):
         },
         confidence=0.91,
         is_outdated=0,
-        evidence_doc_id=f"{batch_id}_doc4"
+        source_doc=f"{batch_id}_doc4.pdf"
     )
     db.add(lab_block)
 
@@ -123,7 +123,7 @@ def create_nba_blocks(batch_id: str, db, attainment_data: dict):
         },
         confidence=0.88,
         is_outdated=0,
-        evidence_doc_id=f"{batch_id}_doc1"
+        source_doc=f"{batch_id}_doc1.pdf"
     )
     db.add(co_block)
     
@@ -149,7 +149,7 @@ def create_nba_blocks(batch_id: str, db, attainment_data: dict):
         },
         confidence=0.90,
         is_outdated=0,
-        evidence_doc_id=f"{batch_id}_doc2"
+        source_doc=f"{batch_id}_doc2.pdf"
     )
     db.add(po_block)
     
@@ -165,7 +165,7 @@ def create_nba_blocks(batch_id: str, db, attainment_data: dict):
         },
         confidence=0.87,
         is_outdated=0,
-        evidence_doc_id=f"{batch_id}_doc3"
+        source_doc=f"{batch_id}_doc3.pdf"
     )
     db.add(pso_block)
 
