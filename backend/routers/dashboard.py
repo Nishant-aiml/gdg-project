@@ -389,7 +389,10 @@ def get_kpi_details_endpoint(
             raise HTTPException(status_code=404, detail="Batch not found")
 
         
-        if user:
+        # SYSTEM BATCHES: Allow access to everyone (demo/comparison data)
+        is_system_batch = getattr(batch, 'data_source', 'user') == 'system'
+        
+        if user and not is_system_batch:
             user_id = user.get("uid")
             role = user.get("role", "department")
             
@@ -456,8 +459,11 @@ def get_yearwise_trends(
             raise HTTPException(status_code=404, detail="Batch not found")
 
         
-        # PLATFORM MODEL: Enforce user access control
-        if user:
+        # SYSTEM BATCHES: Allow access to everyone (demo/comparison data)
+        is_system_batch = getattr(batch, 'data_source', 'user') == 'system'
+        
+        # PLATFORM MODEL: Enforce user access control (skip for system batches)
+        if user and not is_system_batch:
             user_id = user.get("uid")
             role = user.get("role", "department")
             
@@ -571,8 +577,11 @@ def get_forecast(
             raise HTTPException(status_code=404, detail="Batch not found")
 
         
-        # PLATFORM MODEL: Enforce user access control
-        if user:
+        # SYSTEM BATCHES: Allow access to everyone (demo/comparison data)
+        is_system_batch = getattr(batch, 'data_source', 'user') == 'system'
+        
+        # PLATFORM MODEL: Enforce user access control (skip for system batches)
+        if user and not is_system_batch:
             user_id = user.get("uid")
             role = user.get("role", "department")
             
@@ -671,8 +680,11 @@ def get_dashboard_data(
             raise HTTPException(status_code=404, detail="Batch not found")
 
         
-        # PLATFORM MODEL: Enforce user access control
-        if user:
+        # SYSTEM BATCHES: Allow access to everyone (demo/comparison data)
+        is_system_batch = getattr(batch, 'data_source', 'user') == 'system'
+        
+        # PLATFORM MODEL: Enforce user access control (skip for system batches)
+        if user and not is_system_batch:
             user_id = user.get("uid")
             role = user.get("role", "department")
             
