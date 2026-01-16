@@ -1,16 +1,6 @@
 """
 Smart Approval AI - FastAPI Backend
-=====================================
-POWERED BY GOOGLE TECHNOLOGIES:
-- Google Gemini 2.5 Flash AI (Primary AI Engine)
-- Firebase Authentication & Admin SDK
-- Google Cloud Platform Integration
-- Google AI Studio Optimized Prompts
-- Google Cloud Vision API (OCR - Optional)
-
-Architecture: Information Block Architecture with SQLite Temporary Storage
-AI Engine: Google Gemini 2.5 Flash via Google AI Studio API
-Auth: Firebase Authentication with Google Sign-In (OAuth 2.0)
+Minimal, official architecture - SQLite temporary storage only
 """
 
 # Load .env from project root FIRST (before any imports that use env vars)
@@ -141,7 +131,6 @@ def root():
     }
 
 @app.get("/api/health")
-@app.get("/health")  # Railway healthcheck looks for /health
 def health_check():
     return {"status": "healthy"}
 
