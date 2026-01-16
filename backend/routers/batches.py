@@ -190,8 +190,14 @@ def list_batches(
             block_count = db.query(Block).filter(Block.batch_id == batch.id).count()
             
             # Default behavior: filter out batches with 0 processed documents (evidence-driven)
+            # Exception: system batches may have blocks but no files (seeded data)
             if filter != "all":
-                if file_count == 0 or block_count == 0:
+                is_system_batch = getattr(batch, 'data_source', 'user') == 'system'
+                has_evidence = file_count > 0 or block_count > 0
+                if not has_evidence and not is_system_batch:
+                    continue
+                # System batches with blocks are valid
+                if not is_system_batch and file_count == 0 and block_count == 0:
                     continue
             
             # Apply additional filter if specified
