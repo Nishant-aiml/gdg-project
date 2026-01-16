@@ -292,6 +292,7 @@ def seed_system_batches():
                 academic_year=batch_data["year"],
                 data_source="system",
                 is_invalid=0,
+                overall_score=batch_data["overall_score"],  # CRITICAL: Set column for ProductionGuard
                 kpi_results={
                     "fsr_score": batch_data["overall_score"] - 8 + (hash(batch_data["year"]) % 10),
                     "infrastructure_score": batch_data["overall_score"] - 5 + (hash(batch_data["department"]) % 8),
@@ -328,6 +329,7 @@ def seed_system_batches():
             academic_year="2024-25",
             data_source="system",
             is_invalid=0,
+            overall_score=72.1,  # CRITICAL: Set column for ProductionGuard
             kpi_results={
                 "po_attainment": 71.9,
                 "pso_attainment": 73.15,
