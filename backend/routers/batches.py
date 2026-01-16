@@ -164,7 +164,10 @@ def list_batches(
     
     try:
         from config.database import File, Block
-        # PLATFORM MODEL: Filter by user ownership
+        from sqlalchemy import or_
+        
+        # PLATFORM MODEL: Filter by user ownership, but ALWAYS include system batches
+        # System batches are visible to everyone for demo/comparison purposes
         query = db.query(Batch)
         
         if user:
@@ -175,12 +178,20 @@ def list_batches(
                 # Institution users can see all batches (all departments)
                 pass
             else:
-                # Department users see only their department's batches
+                # Department users see their department's batches + ALL system batches
                 department_id = user.get("department_id")
                 if department_id:
-                    query = query.filter(Batch.department_id == department_id)
+                    # Include: user's department batches OR system batches
+                    query = query.filter(or_(
+                        Batch.department_id == department_id,
+                        Batch.data_source == "system"
+                    ))
                 elif user_id:
-                    query = query.filter(Batch.user_id == user_id)
+                    # Include: user's batches OR system batches
+                    query = query.filter(or_(
+                        Batch.user_id == user_id,
+                        Batch.data_source == "system"
+                    ))
         
         batches = query.order_by(Batch.created_at.desc()).all()
         
