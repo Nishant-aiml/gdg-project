@@ -409,6 +409,26 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 <a href="https://github.com/Nishant-aiml">@Nishant-aiml</a><br/>
 <i>Full Stack Developer</i>
 </td>
+<td align="center">
+<b>Ishwari Bhoyar</b><br/>
+<a href="https://github.com/ishwaribhoyar">@ishwaribhoyar</a><br/>
+<i>Developer</i>
+</td>
+<td align="center">
+<b>Gunjan Nandeshwar</b><br/>
+<a href="https://github.com/gunjannan2005">@gunjannan2005</a><br/>
+<i>Developer</i>
+</td>
+</tr>
+<tr>
+<td align="center">
+<b>Komal Gosavi</b><br/>
+<i>Developer</i>
+</td>
+<td align="center">
+<b>Suhani Sorate</b><br/>
+<i>Developer</i>
+</td>
 </tr>
 </table>
 
